@@ -470,11 +470,17 @@ img{max-width:100%;display:block}
     
     <div class="auth-form">
       <input type="text" id="auth-identifier" placeholder="Phone / Email / Username" autocomplete="username">
-      <input type="text" id="auth-name" placeholder="Your Name (optional for login)" style="display:none;">
+      <input type="text" id="auth-name" placeholder="Your Name" style="display:none;">
+      <input type="password" id="auth-password" placeholder="Password" autocomplete="current-password">
+      <input type="text" id="auth-otp" placeholder="6-digit OTP code" maxlength="6" style="display:none;">
       <button id="auth-submit" onclick="handleAuth()">Login</button>
       <div class="toggle-auth">
         Don't have an account? <span onclick="toggleAuthMode()">Register</span>
       </div>
+      <div class="toggle-auth" style="margin-top:8px">
+        <span id="forgot-link" onclick="startForgotPassword()">Forgot password?</span>
+      </div>
+      <div id="auth-error" style="display:none;color:var(--red);font-size:.85rem;margin-top:8px;text-align:center"></div>
     </div>
   </div>
 </div>
@@ -741,189 +747,243 @@ img{max-width:100%;display:block}
   ⚠️ Binary options trading involves significant risk of loss. Past performance is not indicative of future results. Only trade with funds you can afford to lose. This platform is for informational and entertainment purposes. Always trade responsibly.
 </div>
 <script>
-// Global state
+// ── Global state ─────────────────────────────────────────────────────
+const API_BASE = (location.protocol === 'file:' ? 'http://localhost:3000' : '') + '/api';
 let currentUser = null;
-let authMode = 'login';
+let currentToken = null;
+let authMode = 'login';      // 'login' | 'register' | 'demo' | 'otp' | 'forgot' | 'reset'
+let pendingIdentifier = null;
 
-// Initialize local database
-if (!localStorage.getItem('eliteBinaryUsers')) {
-  localStorage.setItem('eliteBinaryUsers', JSON.stringify([]));
+// ── DOM helpers ──────────────────────────────────────────────────────
+const $ = (id) => document.getElementById(id);
+function setError(msg) {
+  const el = $('auth-error');
+  if (!el) return;
+  if (!msg) { el.style.display = 'none'; el.textContent = ''; return; }
+  el.style.display = 'block';
+  el.textContent = msg;
 }
 
-// Show auth modal
+// ── Auth modal ───────────────────────────────────────────────────────
 function showAuthModal(mode) {
-  const modal = document.getElementById('auth-modal');
-
-  authMode = mode === 'demo' ? 'register' : mode;
-
-  const isRegister = authMode === 'register';
-
-  document.getElementById('modal-title').textContent = isRegister
-    ? 'Create Account'
-    : 'Login';
-
-  document.getElementById('modal-subtitle').textContent = isRegister
-    ? 'Start with a demo or real account'
-    : 'Access your trading account';
-
-  document.getElementById('auth-name').style.display = isRegister
-    ? 'block'
-    : 'none';
-
-  document.getElementById('auth-submit').textContent = isRegister
-    ? 'Create Account'
-    : 'Login';
-
-  document.querySelector('.toggle-auth').innerHTML = isRegister
-    ? `Already have an account? <span onclick="toggleAuthMode()">Login</span>`
-    : `Don't have an account? <span onclick="toggleAuthMode()">Register</span>`;
-
+  const modal = $('auth-modal');
+  authMode = mode === 'demo' ? 'demo' : (mode || 'login');
+  applyAuthModeUI();
+  setError('');
   modal.style.display = 'flex';
-  document.getElementById('auth-identifier').focus();
+  $('auth-identifier').focus();
 }
 
-// Hide modal
+function applyAuthModeUI() {
+  const isRegister = authMode === 'register';
+  const isDemo = authMode === 'demo';
+  const isOtp = authMode === 'otp';
+  const isForgot = authMode === 'forgot';
+  const isReset = authMode === 'reset';
+
+  const titles = {
+    login: 'Login', register: 'Create Account', demo: 'Open Demo Account',
+    otp: 'Verify OTP', forgot: 'Reset Password', reset: 'Set New Password'
+  };
+  const subs = {
+    login: 'Access your trading account',
+    register: 'Open a real or demo trading account',
+    demo: 'Start with $10,000 virtual balance — no password needed',
+    otp: 'Enter the 6-digit code we sent you',
+    forgot: 'Enter your email/phone to receive an OTP',
+    reset: 'Enter the OTP we sent and your new password'
+  };
+  const buttons = {
+    login: 'Login', register: 'Create Account', demo: 'Open Demo',
+    otp: 'Verify', forgot: 'Send OTP', reset: 'Reset Password'
+  };
+  $('modal-title').textContent = titles[authMode];
+  $('modal-subtitle').textContent = subs[authMode];
+  $('auth-submit').textContent = buttons[authMode];
+
+  $('auth-identifier').style.display = (isOtp || isReset) ? 'none' : 'block';
+  $('auth-identifier').placeholder = 'Phone / Email / Username';
+  $('auth-name').style.display = (isRegister || isDemo) ? 'block' : 'none';
+  $('auth-name').placeholder = isDemo ? 'Your Name' : 'Your Name';
+  $('auth-password').style.display = (isOtp || isForgot) ? 'none' : 'block';
+  $('auth-password').placeholder = isReset ? 'New password (min 6 chars)' : 'Password';
+  $('auth-password').autocomplete = isRegister || isReset ? 'new-password' : 'current-password';
+  $('auth-otp').style.display = (isOtp || isReset) ? 'block' : 'none';
+
+  const toggle = document.querySelector('.toggle-auth');
+  if (isRegister || isDemo) {
+    toggle.innerHTML = `Already have an account? <span onclick="toggleAuthMode()">Login</span>`;
+  } else if (isOtp || isForgot || isReset) {
+    toggle.innerHTML = `<span onclick="toggleAuthMode()">Back to login</span>`;
+  } else {
+    toggle.innerHTML = `Don't have an account? <span onclick="toggleAuthMode()">Register</span>`;
+  }
+  $('forgot-link').style.display = (authMode === 'login') ? 'inline' : 'none';
+}
+
 function hideAuthModal() {
-  document.getElementById('auth-modal').style.display = 'none';
-
-  document.getElementById('auth-identifier').value = '';
-  document.getElementById('auth-name').value = '';
+  $('auth-modal').style.display = 'none';
+  $('auth-identifier').value = '';
+  $('auth-name').value = '';
+  $('auth-password').value = '';
+  $('auth-otp').value = '';
+  setError('');
 }
 
-// Toggle mode
 function toggleAuthMode() {
-  authMode = authMode === 'login' ? 'register' : 'login';
-  showAuthModal(authMode);
+  authMode = (authMode === 'login') ? 'register' : 'login';
+  applyAuthModeUI();
+  setError('');
 }
 
-// Save current session
-function saveSession(user) {
+function startForgotPassword() {
+  authMode = 'forgot';
+  applyAuthModeUI();
+  setError('');
+}
+
+// ── API ──────────────────────────────────────────────────────────────
+async function api(path, body, method = 'POST') {
+  const opts = {
+    method,
+    headers: { 'Content-Type': 'application/json' }
+  };
+  if (currentToken) opts.headers['Authorization'] = `Bearer ${currentToken}`;
+  if (body) opts.body = JSON.stringify(body);
+  let res, data;
+  try {
+    res = await fetch(API_BASE + path, opts);
+    data = await res.json();
+  } catch (err) {
+    throw new Error('Network error — is the server running?');
+  }
+  if (!res.ok) throw new Error(data.error || 'Request failed');
+  return data;
+}
+
+// ── Session storage ──────────────────────────────────────────────────
+function saveSession(user, token) {
+  localStorage.setItem('eliteBinaryUser', JSON.stringify(user));
+  localStorage.setItem('eliteBinaryToken', token);
+  // Legacy keys kept for any older code paths
   localStorage.setItem('eliteBinaryCurrentUser', JSON.stringify(user));
 }
 
-// Get all users
-function getUsers() {
-  return JSON.parse(localStorage.getItem('eliteBinaryUsers')) || [];
+function clearSession() {
+  localStorage.removeItem('eliteBinaryUser');
+  localStorage.removeItem('eliteBinaryToken');
+  localStorage.removeItem('eliteBinaryCurrentUser');
+  currentUser = null;
+  currentToken = null;
 }
 
-// Save users
-function saveUsers(users) {
-  localStorage.setItem('eliteBinaryUsers', JSON.stringify(users));
-}
-
-// Handle login and registration
+// ── Auth submit ──────────────────────────────────────────────────────
 async function handleAuth() {
-  const identifier = document.getElementById('auth-identifier').value.trim();
-  const name = document.getElementById('auth-name').value.trim();
-  const submitBtn = document.getElementById('auth-submit');
+  const submitBtn = $('auth-submit');
+  const identifier = $('auth-identifier').value.trim();
+  const name = $('auth-name').value.trim();
+  const password = $('auth-password').value;
+  const otp = $('auth-otp').value.trim();
 
-  if (!identifier) {
-    alert('Please enter your phone, email or username');
-    return;
-  }
-
-  if (authMode === 'register' && !name) {
-    alert('Please enter your name');
-    return;
-  }
-
+  setError('');
   submitBtn.disabled = true;
+  const prevText = submitBtn.textContent;
   submitBtn.textContent = 'Processing...';
 
-  setTimeout(() => {
-    let users = getUsers();
-
-    // REGISTER
+  try {
+    if (authMode === 'demo') {
+      if (!identifier) throw new Error('Enter an email/phone/username');
+      const data = await api('/auth/register', {
+        identifier, name: name || identifier, demo: true
+      });
+      onAuthSuccess(data);
+      return;
+    }
     if (authMode === 'register') {
-      const existingUser = users.find(
-        user => user.identifier.toLowerCase() === identifier.toLowerCase()
-      );
-
-      if (existingUser) {
-        alert('Account already exists. Please login instead.');
-        submitBtn.disabled = false;
-        submitBtn.textContent = 'Create Account';
-        return;
-      }
-
-      const newUser = {
-        id: 'EB-' + Date.now(),
-        name,
-        identifier,
-        balance: 10000,
-        demo: true,
-        createdAt: new Date().toISOString()
-      };
-
-      users.push(newUser);
-      saveUsers(users);
-      saveSession(newUser);
-
-      currentUser = newUser;
-
-      hideAuthModal();
-
-      alert(`Welcome ${newUser.name}! Your demo account with $10,000 has been created successfully.`);
-
-      updateLoggedInUI();
+      if (!identifier) throw new Error('Enter an email/phone/username');
+      if (!name) throw new Error('Enter your name');
+      if (!password || password.length < 6) throw new Error('Password must be at least 6 characters');
+      const data = await api('/auth/register', { identifier, name, password, demo: false });
+      onAuthSuccess(data);
+      return;
     }
-
-    // LOGIN
-    else {
-      const existingUser = users.find(
-        user => user.identifier.toLowerCase() === identifier.toLowerCase()
-      );
-
-      if (!existingUser) {
-        alert('Account not found. Please register first.');
-        submitBtn.disabled = false;
-        submitBtn.textContent = 'Login';
-        return;
-      }
-
-      currentUser = existingUser;
-      saveSession(existingUser);
-
-      hideAuthModal();
-
-      alert(`Welcome back ${existingUser.name}! Login successful.`);
-
-      updateLoggedInUI();
+    if (authMode === 'login') {
+      if (!identifier) throw new Error('Enter your email/phone/username');
+      const data = await api('/auth/login', { identifier, password });
+      onAuthSuccess(data);
+      return;
     }
-
+    if (authMode === 'forgot') {
+      if (!identifier) throw new Error('Enter your email/phone');
+      const data = await api('/auth/request-otp', { identifier });
+      pendingIdentifier = identifier;
+      authMode = 'reset';
+      applyAuthModeUI();
+      const note = data.devOtp ? ` (dev code: ${data.devOtp})` : '';
+      setError(`OTP sent.${note} Enter it below with your new password.`);
+      return;
+    }
+    if (authMode === 'reset') {
+      if (!pendingIdentifier) throw new Error('Restart the reset flow');
+      if (!otp) throw new Error('Enter the OTP code');
+      if (!password || password.length < 6) throw new Error('Password must be at least 6 characters');
+      const data = await api('/auth/reset-password', {
+        identifier: pendingIdentifier, otp, newPassword: password
+      });
+      onAuthSuccess(data);
+      return;
+    }
+    if (authMode === 'otp') {
+      if (!pendingIdentifier) throw new Error('Restart verification');
+      const data = await api('/auth/verify-otp', { identifier: pendingIdentifier, otp });
+      setError('Verified. You can now login.');
+      authMode = 'login';
+      applyAuthModeUI();
+      return;
+    }
+  } catch (err) {
+    setError(err.message);
+  } finally {
     submitBtn.disabled = false;
-    submitBtn.textContent = authMode === 'login'
-      ? 'Login'
-      : 'Create Account';
-
-  }, 800);
+    submitBtn.textContent = prevText;
+  }
 }
 
-// Update navbar after login
-function updateLoggedInUI() {
-  const navButtons = document.querySelectorAll('.nav-cta, .nav-mobile-cta');
+function onAuthSuccess(data) {
+  if (!data || !data.user || !data.token) {
+    setError('Unexpected server response');
+    return;
+  }
+  currentUser = data.user;
+  currentToken = data.token;
+  saveSession(currentUser, currentToken);
+  hideAuthModal();
+  // Redirect to dashboard
+  window.location.href = '/dashboard.html';
+}
 
-  navButtons.forEach(btn => {
-    btn.textContent = currentUser
-      ? `${currentUser.name}`
-      : 'Login';
+function updateLoggedInUI() {
+  document.querySelectorAll('.nav-cta, .nav-mobile-cta').forEach((btn) => {
+    btn.textContent = currentUser ? (currentUser.name || 'Account') : 'Login';
+    if (currentUser) {
+      btn.onclick = () => { window.location.href = '/dashboard.html'; };
+    }
   });
 }
 
-// Restore session on refresh
+// ── Restore session ──────────────────────────────────────────────────
 (function restoreSession() {
-  const savedUser = localStorage.getItem('eliteBinaryCurrentUser');
-
+  const savedUser = localStorage.getItem('eliteBinaryUser') || localStorage.getItem('eliteBinaryCurrentUser');
+  const savedToken = localStorage.getItem('eliteBinaryToken');
   if (savedUser) {
-    currentUser = JSON.parse(savedUser);
-    updateLoggedInUI();
+    try { currentUser = JSON.parse(savedUser); } catch (_) { currentUser = null; }
   }
+  currentToken = savedToken || null;
+  updateLoggedInUI();
 })();
 
-// Open app compatibility
-function openApp(mode) {
-  showAuthModal(mode);
-}
+// Compatibility shim used by older inline onclick handlers
+function openApp(mode) { showAuthModal(mode); }
 
 // ── LIVE TICKER via Deriv WebSocket ──
 const APP_ID = 1089;

@@ -425,13 +425,13 @@ let currentToken = null;
 let currentTab = 'overview';
 let accountMode = 'demo';
 let priceChart = null;
-const API_URL = 'http://localhost:3000/api';
+const API_URL = (location.protocol === 'file:' ? 'http://localhost:3000' : '') + '/api';
 
 // ─────────────────────────────────────
 // INITIALIZATION
 // ─────────────────────────────────────
 (async function init() {
-  const savedUser = localStorage.getItem('eliteBinaryUser');
+  const savedUser = localStorage.getItem('eliteBinaryUser') || localStorage.getItem('eliteBinaryCurrentUser');
   const savedToken = localStorage.getItem('eliteBinaryToken');
 
   if (!savedUser || !savedToken) {
@@ -444,6 +444,8 @@ const API_URL = 'http://localhost:3000/api';
     currentToken = savedToken;
     updateUI();
     await loadUserData();
+    initChart();
+    connectLiveTicker();
     setInterval(loadUserData, 5000);
   } catch (err) {
     console.error('Init error:', err);
@@ -468,13 +470,12 @@ function updateUI() {
 function switchTab(tab) {
   currentTab = tab;
   document.querySelectorAll('.tab').forEach(t => t.style.display = 'none');
-  document.getElementById(tab + '-tab').style.display = 'block';
+  const tabEl = document.getElementById(tab + '-tab');
+  if (tabEl) tabEl.style.display = 'block';
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  event.target.classList.add('active');
+  if (typeof event !== 'undefined' && event && event.target) event.target.classList.add('active');
 
-  if (tab === 'trading') {
-    initChart();
-  } else if (tab === 'trades') {
+  if (tab === 'trades') {
     loadTradeHistory();
   } else if (tab === 'wallet') {
     loadTransactionHistory();
@@ -514,11 +515,14 @@ async function apiCall(endpoint, method = 'GET', body = null) {
       logout();
       return null;
     }
-    return await res.json();
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { error: data.error || `Request failed (${res.status})` };
+    }
+    return data;
   } catch (err) {
     console.error(err);
-    showMessage('Connection error', 'error');
-    return null;
+    return { error: 'Connection error — is the server running?' };
   }
 }
 
@@ -527,10 +531,15 @@ async function apiCall(endpoint, method = 'GET', body = null) {
 // ─────────────────────────────────────
 async function loadUserData() {
   const data = await apiCall('/wallet');
-  if (!data) return;
+  if (!data || data.error) return;
 
   const user = data.user;
-  currentUser.balance = user.balance;
+  currentUser = { ...currentUser, ...user };
+  localStorage.setItem('eliteBinaryUser', JSON.stringify(currentUser));
+  if (currentUser.role === 'admin') {
+    const an = document.getElementById('admin-nav');
+    if (an) an.style.display = 'block';
+  }
 
   document.getElementById('balance-display').textContent = '$' + user.balance.toFixed(2);
 
@@ -607,13 +616,19 @@ async function loadTransactionHistory() {
 }
 
 async function loadAdminSummary() {
+  const adminKey = localStorage.getItem('adminKey') || prompt('Enter admin key (saved locally for this session):', '') || '';
+  if (adminKey) localStorage.setItem('adminKey', adminKey);
   const options = {
-    headers: { 'X-Admin-Key': localStorage.getItem('adminKey') || 'change-this-admin-key' }
+    headers: { 'X-Admin-Key': adminKey }
   };
 
   try {
     const res = await fetch(API_URL + '/admin/summary', options);
     const data = await res.json();
+    if (!res.ok) {
+      document.getElementById('admin-summary').innerHTML = `<div class="error">${data.error || 'Failed to load admin summary'}</div>`;
+      return;
+    }
 
     const html = `
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px">
@@ -660,12 +675,15 @@ async function executeTrade() {
     return;
   }
 
+  const submitBtn = document.querySelector('#trading-tab .btn-primary');
+  if (submitBtn) submitBtn.disabled = true;
   const result = await apiCall('/trades', 'POST', {
     stake,
     contractType,
     symbol,
     params: {}
   });
+  if (submitBtn) submitBtn.disabled = false;
 
   if (!result) return;
 
@@ -675,6 +693,7 @@ async function executeTrade() {
   }
 
   currentUser.balance = result.user.balance;
+  document.getElementById('balance-display').textContent = '$' + Number(result.user.balance).toFixed(2);
   showMessage(
     `Trade executed! ${result.trade.won ? 'Won' : 'Lost'} $${Math.abs(result.trade.profit).toFixed(2)}`,
     result.trade.won ? 'success' : 'error',
@@ -709,6 +728,10 @@ async function initiateDeposit() {
   });
 
   if (!result) return;
+  if (result.error) {
+    showMessage(result.error, 'error', 'deposit-message');
+    return;
+  }
 
   showMessage(result.message || 'Deposit initiated', 'success', 'deposit-message');
   document.getElementById('deposit-amount').value = '';
@@ -742,6 +765,10 @@ async function initiateWithdrawal() {
   });
 
   if (!result) return;
+  if (result.error) {
+    showMessage(result.error, 'error', 'withdrawal-message');
+    return;
+  }
 
   showMessage('Withdrawal initiated', 'success', 'withdrawal-message');
   document.getElementById('withdrawal-amount').value = '';
@@ -768,6 +795,10 @@ async function updateAdminConfig() {
   try {
     const res = await fetch(API_URL + '/admin/config', options);
     const data = await res.json();
+    if (!res.ok) {
+      showMessage(data.error || 'Failed to update config', 'error', 'admin-message');
+      return;
+    }
     showMessage('Config updated', 'success', 'admin-message');
   } catch (err) {
     showMessage(err.message, 'error', 'admin-message');
@@ -777,51 +808,81 @@ async function updateAdminConfig() {
 // ─────────────────────────────────────
 // CHART
 // ─────────────────────────────────────
+const MAX_CHART_POINTS = 60;
+const chartPrices = [];
+const chartLabels = [];
+
 function initChart() {
   const ctx = document.getElementById('priceChart');
   if (!ctx) return;
 
-  const prices = Array.from({length: 20}, () => (100 + Math.random() * 50).toFixed(2));
-  const times = Array.from({length: 20}, (_, i) => `${i}s`);
-
-  if (priceChart) priceChart.destroy();
+  if (priceChart) return; // already initialised
 
   priceChart = new Chart(ctx, {
     type: 'line',
     data: {
-      labels: times,
+      labels: chartLabels.slice(),
       datasets: [{
-        label: 'Live Price',
-        data: prices,
+        label: 'Live Price (Vol 50 1s)',
+        data: chartPrices.slice(),
         borderColor: '#1b8ef8',
         backgroundColor: 'rgba(27,142,248,0.1)',
         tension: 0.4,
         fill: true,
-        pointRadius: 3,
-        pointBackgroundColor: '#1b8ef8'
+        pointRadius: 0,
+        borderWidth: 2
       }]
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      animation: false,
       plugins: {
-        legend: {
-          display: true,
-          labels: { color: '#7a8fb0', font: { family: 'Lexend' } }
-        }
+        legend: { display: true, labels: { color: '#7a8fb0', font: { family: 'Lexend' } } }
       },
       scales: {
-        y: {
-          grid: { color: 'rgba(28,42,64,0.3)' },
-          ticks: { color: '#7a8fb0' }
-        },
-        x: {
-          grid: { color: 'rgba(28,42,64,0.3)' },
-          ticks: { color: '#7a8fb0' }
-        }
+        y: { grid: { color: 'rgba(28,42,64,0.3)' }, ticks: { color: '#7a8fb0' } },
+        x: { grid: { color: 'rgba(28,42,64,0.3)' }, ticks: { color: '#7a8fb0', maxTicksLimit: 8 } }
       }
     }
   });
+}
+
+function pushPrice(price) {
+  const t = new Date();
+  const lbl = `${String(t.getHours()).padStart(2,'0')}:${String(t.getMinutes()).padStart(2,'0')}:${String(t.getSeconds()).padStart(2,'0')}`;
+  chartPrices.push(price);
+  chartLabels.push(lbl);
+  if (chartPrices.length > MAX_CHART_POINTS) {
+    chartPrices.shift();
+    chartLabels.shift();
+  }
+  if (priceChart) {
+    priceChart.data.labels = chartLabels.slice();
+    priceChart.data.datasets[0].data = chartPrices.slice();
+    priceChart.update('none');
+  }
+}
+
+let liveWs = null;
+function connectLiveTicker() {
+  try { if (liveWs) liveWs.close(); } catch (_) {}
+  try {
+    liveWs = new WebSocket('wss://ws.derivws.com/websockets/v3?app_id=1089&l=EN&brand=deriv');
+  } catch (e) { return; }
+  liveWs.onopen = () => {
+    try { liveWs.send(JSON.stringify({ ticks: '1HZ50V', subscribe: 1 })); } catch (_) {}
+  };
+  liveWs.onmessage = (e) => {
+    try {
+      const d = JSON.parse(e.data);
+      if (d.msg_type === 'tick' && d.tick && typeof d.tick.quote === 'number') {
+        pushPrice(d.tick.quote);
+      }
+    } catch (_) {}
+  };
+  liveWs.onclose = () => setTimeout(connectLiveTicker, 4000);
+  liveWs.onerror = () => {};
 }
 
 // ─────────────────────────────────────

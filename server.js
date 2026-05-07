@@ -4,8 +4,13 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
+try { require('dotenv').config(); } catch (_) { /* optional */ }
+
 const PORT = Number(process.env.PORT || 3000);
 const ADMIN_KEY = process.env.ADMIN_KEY || 'change-this-admin-key';
+const JWT_SECRET = process.env.JWT_SECRET || 'change-this-jwt-secret-please';
+const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const OTP_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const DATA_DIR = path.join(__dirname, 'data');
 const DB_PATH = path.join(DATA_DIR, 'db.json');
 const MPESA_ENV = (process.env.MPESA_ENV || 'sandbox').toLowerCase();
@@ -24,7 +29,8 @@ const defaultDb = {
   deposits: [],
   withdrawals: [],
   trades: [],
-  ledger: []
+  ledger: [],
+  otpCodes: []
 };
 
 function ensureDb() {
@@ -38,7 +44,7 @@ function readDb() {
   ensureDb();
   const db = JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
   db.config = { ...defaultDb.config, ...(db.config || {}) };
-  for (const key of ['users', 'deposits', 'withdrawals', 'trades', 'ledger']) {
+  for (const key of ['users', 'deposits', 'withdrawals', 'trades', 'ledger', 'otpCodes']) {
     if (!Array.isArray(db[key])) db[key] = [];
   }
   return db;
@@ -64,6 +70,86 @@ function findUser(db, userId) {
   return db.users.find((u) => u.id === userId);
 }
 
+function findUserByIdentifier(db, identifier) {
+  if (!identifier) return null;
+  const norm = String(identifier).trim().toLowerCase();
+  return db.users.find((u) => String(u.identifier).toLowerCase() === norm) || null;
+}
+
+// ── Password hashing (scrypt, no external deps) ─────────────────────────
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const derived = crypto.scryptSync(String(password), salt, 64).toString('hex');
+  return `scrypt$${salt}$${derived}`;
+}
+
+function verifyPassword(password, stored) {
+  if (!stored || typeof stored !== 'string') return false;
+  const parts = stored.split('$');
+  if (parts.length !== 3 || parts[0] !== 'scrypt') return false;
+  const [, salt, expected] = parts;
+  const derived = crypto.scryptSync(String(password || ''), salt, 64).toString('hex');
+  const a = Buffer.from(expected, 'hex');
+  const b = Buffer.from(derived, 'hex');
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+// ── Signed tokens (JWT-style HS256, no external deps) ───────────────────
+function b64url(input) {
+  return Buffer.from(input).toString('base64')
+    .replace(/=+$/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+}
+function b64urlDecode(input) {
+  const pad = input.length % 4 === 0 ? '' : '='.repeat(4 - (input.length % 4));
+  return Buffer.from(input.replace(/-/g, '+').replace(/_/g, '/') + pad, 'base64').toString('utf8');
+}
+function signToken(payload) {
+  const header = b64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+  const body = b64url(JSON.stringify({ ...payload, iat: Date.now(), exp: Date.now() + TOKEN_TTL_MS }));
+  const sig = crypto.createHmac('sha256', JWT_SECRET).update(`${header}.${body}`).digest('base64')
+    .replace(/=+$/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+  return `${header}.${body}.${sig}`;
+}
+function verifyToken(token) {
+  if (!token || typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+  const [header, body, sig] = parts;
+  const expected = crypto.createHmac('sha256', JWT_SECRET).update(`${header}.${body}`).digest('base64')
+    .replace(/=+$/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+  if (sig.length !== expected.length) return null;
+  if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
+  let payload;
+  try { payload = JSON.parse(b64urlDecode(body)); } catch (_) { return null; }
+  if (!payload || (payload.exp && payload.exp < Date.now())) return null;
+  return payload;
+}
+
+function getBearer(req) {
+  const h = req.headers['authorization'] || req.headers['Authorization'];
+  if (!h || typeof h !== 'string') return null;
+  const m = h.match(/^Bearer\s+(.+)$/i);
+  return m ? m[1].trim() : null;
+}
+
+function authenticate(req, db) {
+  const token = getBearer(req);
+  if (!token) return null;
+  const payload = verifyToken(token);
+  if (!payload || !payload.userId) return null;
+  const user = findUser(db, payload.userId);
+  if (!user || user.suspended) return null;
+  return user;
+}
+
+function publicUser(user) {
+  if (!user) return null;
+  const { passwordHash, ...rest } = user;
+  return rest;
+}
+
+// ── Trade settlement ────────────────────────────────────────────────────
 function settleContract(contractType, params = {}, config = {}) {
   const type = String(contractType || '').toUpperCase();
   const configuredProbability = Number(config.winProbability);
@@ -111,12 +197,14 @@ function send(res, status, body) {
   res.writeHead(status, {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type, X-Admin-Key',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS'
+    'Access-Control-Allow-Headers': 'Content-Type, X-Admin-Key, Authorization',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Cache-Control': 'no-store'
   });
   res.end(payload);
 }
 
+// ── M-Pesa helpers (unchanged) ──────────────────────────────────────────
 function providerRequest(method, requestPath, payload, token) {
   return new Promise((resolve, reject) => {
     const raw = payload ? JSON.stringify(payload) : '';
@@ -147,31 +235,12 @@ function providerRequest(method, requestPath, payload, token) {
 
 async function mpesaToken() {
   const basicAuth = process.env.MPESA_BASIC_AUTH;
-  if (basicAuth) {
-    return new Promise((resolve, reject) => {
-      const req = https.request({
-        hostname: MPESA_HOST,
-        path: '/oauth/v1/generate?grant_type=client_credentials',
-        method: 'GET',
-        headers: { Authorization: `Basic ${basicAuth}` }
-      }, (res) => {
-        let data = '';
-        res.on('data', (chunk) => { data += chunk; });
-        res.on('end', () => {
-          let parsed = {};
-          try { parsed = data ? JSON.parse(data) : {}; } catch (_) { parsed = { raw: data }; }
-          if (parsed.access_token) return resolve(parsed.access_token);
-          reject(new Error(parsed.errorMessage || 'Unable to get M-Pesa access token'));
-        });
-      });
-      req.on('error', reject);
-      req.end();
-    });
-  }
-  const key = process.env.MPESA_CONSUMER_KEY;
-  const secret = process.env.MPESA_CONSUMER_SECRET;
-  if (!key || !secret) throw new Error('M-Pesa credentials are not configured');
-  const auth = Buffer.from(`${key}:${secret}`).toString('base64');
+  const auth = basicAuth || (() => {
+    const key = process.env.MPESA_CONSUMER_KEY;
+    const secret = process.env.MPESA_CONSUMER_SECRET;
+    if (!key || !secret) throw new Error('M-Pesa credentials are not configured');
+    return Buffer.from(`${key}:${secret}`).toString('base64');
+  })();
   return new Promise((resolve, reject) => {
     const req = https.request({
       hostname: MPESA_HOST,
@@ -253,6 +322,13 @@ async function sendB2cPayment({ amount, destination, reference }) {
   }, token);
 }
 
+// ── OTP delivery (logs to console; pluggable for Twilio/Nodemailer) ─────
+async function deliverOtp(identifier, otp) {
+  // Hook for Twilio/Nodemailer/SendGrid in production. In dev, log to console.
+  // Optional Nodemailer/Twilio integration can be wired here when env vars are set.
+  console.log(`[OTP] ${identifier} → ${otp}`);
+}
+
 function serveFile(res, filePath, contentType) {
   fs.readFile(filePath, (err, data) => {
     if (err) {
@@ -260,7 +336,7 @@ function serveFile(res, filePath, contentType) {
       res.end('Not found');
       return;
     }
-    res.writeHead(200, { 'Content-Type': contentType });
+    res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'no-cache' });
     res.end(data);
   });
 }
@@ -291,6 +367,15 @@ function requireAdmin(req, res) {
   return true;
 }
 
+function requireUser(req, res, db) {
+  const user = authenticate(req, db);
+  if (!user) {
+    send(res, 401, { error: 'Authentication required' });
+    return null;
+  }
+  return user;
+}
+
 async function routeApi(req, res) {
   if (req.method === 'OPTIONS') return send(res, 200, { ok: true });
 
@@ -298,23 +383,78 @@ async function routeApi(req, res) {
   const db = readDb();
 
   try {
+    // ── Public ────────────────────────────────────────────────────────
+    if (req.method === 'GET' && url.pathname === '/api/health') {
+      return send(res, 200, { ok: true, time: now() });
+    }
     if (req.method === 'GET' && url.pathname === '/api/config') {
       return send(res, 200, { config: db.config });
     }
 
+    // ── Auth: register ────────────────────────────────────────────────
+    if (req.method === 'POST' && url.pathname === '/api/auth/register') {
+      const body = await parseBody(req);
+      const identifier = String(body.identifier || '').trim();
+      const password = String(body.password || '');
+      const name = String(body.name || identifier).trim();
+      const demo = Boolean(body.demo);
+
+      if (!identifier) return send(res, 400, { error: 'Identifier (email/phone) is required' });
+      if (!demo && password.length < 6) {
+        return send(res, 400, { error: 'Password must be at least 6 characters' });
+      }
+      if (findUserByIdentifier(db, identifier)) {
+        return send(res, 409, { error: 'Account already exists. Please login instead.' });
+      }
+
+      const user = {
+        id: id('usr'),
+        identifier,
+        name: name || identifier,
+        passwordHash: password ? hashPassword(password) : null,
+        balance: demo ? 10000 : 0,
+        demo,
+        verified: false,
+        suspended: false,
+        role: 'user',
+        createdAt: now()
+      };
+      db.users.push(user);
+      ledger(db, {
+        userId: user.id,
+        type: demo ? 'demo_credit' : 'wallet_opened',
+        amount: user.balance,
+        balanceAfter: user.balance,
+        reference: 'initial'
+      });
+      writeDb(db);
+
+      const token = signToken({ userId: user.id });
+      return send(res, 200, { user: publicUser(user), token });
+    }
+
+    // ── Auth: login (password) ────────────────────────────────────────
     if (req.method === 'POST' && url.pathname === '/api/auth/login') {
       const body = await parseBody(req);
       const identifier = String(body.identifier || '').trim();
+      const password = String(body.password || '');
+
       if (!identifier) return send(res, 400, { error: 'Identifier is required' });
 
-      let user = db.users.find((u) => u.identifier === identifier);
-      if (!user) {
+      let user = findUserByIdentifier(db, identifier);
+
+      // Legacy/demo path: identifier-only login auto-creates a demo account
+      if (!user && (body.demo || !password)) {
         user = {
           id: id('usr'),
           identifier,
           name: String(body.name || identifier).trim(),
+          passwordHash: null,
           balance: body.demo ? 10000 : 0,
           demo: Boolean(body.demo),
+          verified: false,
+          suspended: false,
+          role: 'user',
           createdAt: now()
         };
         db.users.push(user);
@@ -325,22 +465,120 @@ async function routeApi(req, res) {
           balanceAfter: user.balance,
           reference: 'initial'
         });
+        writeDb(db);
       }
+
+      if (!user) return send(res, 404, { error: 'Account not found. Please register first.' });
+      if (user.suspended) return send(res, 403, { error: 'Account suspended. Contact support.' });
+
+      if (user.passwordHash) {
+        if (!password) return send(res, 400, { error: 'Password is required' });
+        if (!verifyPassword(password, user.passwordHash)) {
+          return send(res, 401, { error: 'Invalid password' });
+        }
+      }
+
+      const token = signToken({ userId: user.id });
+      return send(res, 200, { user: publicUser(user), token });
+    }
+
+    // ── Auth: OTP request ─────────────────────────────────────────────
+    if (req.method === 'POST' && url.pathname === '/api/auth/request-otp') {
+      const body = await parseBody(req);
+      const identifier = String(body.identifier || '').trim();
+      if (!identifier) return send(res, 400, { error: 'Identifier is required' });
+      // Throttle: at most one active OTP per identifier
+      db.otpCodes = db.otpCodes.filter((o) =>
+        !(String(o.identifier).toLowerCase() === identifier.toLowerCase() && !o.verified && new Date(o.expiresAt) > new Date())
+      );
+      const otp = String(crypto.randomInt(100000, 1000000));
+      const record = {
+        id: id('otp'),
+        identifier,
+        otp,
+        verified: false,
+        createdAt: now(),
+        expiresAt: new Date(Date.now() + OTP_TTL_MS).toISOString()
+      };
+      db.otpCodes.push(record);
       writeDb(db);
-      return send(res, 200, { user });
+      await deliverOtp(identifier, otp);
+      const devEcho = String(process.env.OTP_DEV_ECHO || 'true').toLowerCase() !== 'false';
+      return send(res, 200, { ok: true, expiresAt: record.expiresAt, ...(devEcho ? { devOtp: otp } : {}) });
     }
 
+    // ── Auth: OTP verify ──────────────────────────────────────────────
+    if (req.method === 'POST' && url.pathname === '/api/auth/verify-otp') {
+      const body = await parseBody(req);
+      const identifier = String(body.identifier || '').trim();
+      const otp = String(body.otp || '').trim();
+      const record = [...db.otpCodes].reverse().find((o) =>
+        String(o.identifier).toLowerCase() === identifier.toLowerCase() &&
+        !o.verified &&
+        new Date(o.expiresAt) > new Date()
+      );
+      if (!record) return send(res, 400, { error: 'OTP expired or not found. Request a new one.' });
+      if (record.otp !== otp) return send(res, 400, { error: 'Invalid OTP' });
+      record.verified = true;
+      record.verifiedAt = now();
+      const user = findUserByIdentifier(db, identifier);
+      if (user) user.verified = true;
+      writeDb(db);
+      return send(res, 200, { ok: true, verified: true });
+    }
+
+    // ── Auth: reset password (after OTP verify) ───────────────────────
+    if (req.method === 'POST' && url.pathname === '/api/auth/reset-password') {
+      const body = await parseBody(req);
+      const identifier = String(body.identifier || '').trim();
+      const newPassword = String(body.newPassword || body.password || '');
+      const otp = String(body.otp || '').trim();
+      if (newPassword.length < 6) return send(res, 400, { error: 'Password must be at least 6 characters' });
+      const user = findUserByIdentifier(db, identifier);
+      if (!user) return send(res, 404, { error: 'Account not found' });
+      const record = [...db.otpCodes].reverse().find((o) =>
+        String(o.identifier).toLowerCase() === identifier.toLowerCase() &&
+        o.otp === otp &&
+        new Date(o.expiresAt) > new Date()
+      );
+      if (!record) return send(res, 400, { error: 'Invalid or expired OTP' });
+      record.verified = true;
+      user.passwordHash = hashPassword(newPassword);
+      writeDb(db);
+      const token = signToken({ userId: user.id });
+      return send(res, 200, { ok: true, user: publicUser(user), token });
+    }
+
+    // ── User profile ─────────────────────────────────────────────────
+    if (req.method === 'GET' && url.pathname === '/api/user/profile') {
+      const user = requireUser(req, res, db);
+      if (!user) return;
+      return send(res, 200, { user: publicUser(user) });
+    }
+
+    // ── Wallet ────────────────────────────────────────────────────────
     if (req.method === 'GET' && url.pathname === '/api/wallet') {
-      const user = findUser(db, url.searchParams.get('userId'));
-      if (!user) return send(res, 404, { error: 'User not found' });
-      return send(res, 200, { user, ledger: db.ledger.filter((l) => l.userId === user.id).slice(-50) });
+      // Prefer Bearer auth; fall back to ?userId= for legacy callers
+      let user = authenticate(req, db);
+      if (!user) {
+        const qid = url.searchParams.get('userId');
+        user = qid ? findUser(db, qid) : null;
+      }
+      if (!user) return send(res, 401, { error: 'Authentication required' });
+      return send(res, 200, {
+        user: publicUser(user),
+        ledger: db.ledger.filter((l) => l.userId === user.id).slice(-50)
+      });
     }
 
+    // ── Deposits ──────────────────────────────────────────────────────
     if (req.method === 'POST' && url.pathname === '/api/deposits') {
       const body = await parseBody(req);
-      const user = findUser(db, body.userId);
+      let user = authenticate(req, db);
+      if (!user && body.userId) user = findUser(db, body.userId);
+      if (!user) return send(res, 401, { error: 'Authentication required' });
+
       const amount = money(body.amount);
-      if (!user) return send(res, 404, { error: 'User not found' });
       if (amount <= 0) return send(res, 400, { error: 'Deposit amount must be greater than zero' });
       if (String(body.method || 'mpesa') === 'mpesa' && !String(body.phone || '').trim()) {
         return send(res, 400, { error: 'M-Pesa phone number is required' });
@@ -382,7 +620,7 @@ async function routeApi(req, res) {
       writeDb(db);
       return send(res, 200, {
         deposit,
-        user,
+        user: publicUser(user),
         message: db.config.mockPayments
           ? 'Mock STK push completed and wallet credited.'
           : 'STK push initiated. Credit wallet from the provider callback.'
@@ -415,11 +653,14 @@ async function routeApi(req, res) {
       return send(res, 200, { ok: true });
     }
 
+    // ── Trading ───────────────────────────────────────────────────────
     if (req.method === 'POST' && url.pathname === '/api/trades') {
       const body = await parseBody(req);
-      const user = findUser(db, body.userId);
+      let user = authenticate(req, db);
+      if (!user && body.userId) user = findUser(db, body.userId);
+      if (!user) return send(res, 401, { error: 'Authentication required' });
+
       const stake = money(body.stake);
-      if (!user) return send(res, 404, { error: 'User not found' });
       if (stake <= 0) return send(res, 400, { error: 'Stake must be greater than zero' });
       if (user.balance < stake) return send(res, 400, { error: 'Insufficient wallet balance' });
 
@@ -461,14 +702,24 @@ async function routeApi(req, res) {
       };
       db.trades.push(trade);
       writeDb(db);
-      return send(res, 200, { trade, user, config: db.config });
+      return send(res, 200, { trade, user: publicUser(user), config: db.config });
     }
 
+    if (req.method === 'GET' && url.pathname === '/api/trades') {
+      const user = requireUser(req, res, db);
+      if (!user) return;
+      const trades = db.trades.filter((t) => t.userId === user.id).slice(-100);
+      return send(res, 200, { trades });
+    }
+
+    // ── Withdrawals ───────────────────────────────────────────────────
     if (req.method === 'POST' && url.pathname === '/api/withdrawals') {
       const body = await parseBody(req);
-      const user = findUser(db, body.userId);
+      let user = authenticate(req, db);
+      if (!user && body.userId) user = findUser(db, body.userId);
+      if (!user) return send(res, 401, { error: 'Authentication required' });
+
       const amount = money(body.amount);
-      if (!user) return send(res, 404, { error: 'User not found' });
       if (amount <= 0) return send(res, 400, { error: 'Withdrawal amount must be greater than zero' });
       if (user.balance < amount) return send(res, 400, { error: 'Insufficient wallet balance' });
 
@@ -498,7 +749,7 @@ async function routeApi(req, res) {
         reference: withdrawal.id
       });
       writeDb(db);
-      return send(res, 200, { withdrawal, user });
+      return send(res, 200, { withdrawal, user: publicUser(user) });
     }
 
     if (req.method === 'POST' && url.pathname === '/api/mpesa/b2c-result') {
@@ -528,11 +779,12 @@ async function routeApi(req, res) {
       return send(res, 200, { ok: true });
     }
 
+    // ── Admin ─────────────────────────────────────────────────────────
     if (req.method === 'GET' && url.pathname === '/api/admin/summary') {
       if (!requireAdmin(req, res)) return;
       return send(res, 200, {
         config: db.config,
-        users: db.users,
+        users: db.users.map(publicUser),
         deposits: db.deposits.slice(-100),
         withdrawals: db.withdrawals.slice(-100),
         trades: db.trades.slice(-100),
@@ -562,11 +814,82 @@ async function routeApi(req, res) {
       return send(res, 200, { config: db.config });
     }
 
+    if (req.method === 'POST' && url.pathname === '/api/admin/users/suspend') {
+      if (!requireAdmin(req, res)) return;
+      const body = await parseBody(req);
+      const user = findUser(db, body.userId);
+      if (!user) return send(res, 404, { error: 'User not found' });
+      user.suspended = Boolean(body.suspended ?? true);
+      writeDb(db);
+      return send(res, 200, { user: publicUser(user) });
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/admin/withdrawals/approve') {
+      if (!requireAdmin(req, res)) return;
+      const body = await parseBody(req);
+      const wd = db.withdrawals.find((w) => w.id === body.withdrawalId);
+      if (!wd) return send(res, 404, { error: 'Withdrawal not found' });
+      const action = String(body.action || 'approve');
+      if (action === 'approve') {
+        wd.status = 'paid';
+      } else if (action === 'reject') {
+        wd.status = 'failed';
+        const user = findUser(db, wd.userId);
+        if (user && !db.ledger.some((l) => l.reference === `${wd.id}:refund`)) {
+          user.balance = money(user.balance + wd.amount);
+          ledger(db, {
+            userId: user.id,
+            type: 'withdrawal_refund',
+            amount: wd.amount,
+            balanceAfter: user.balance,
+            reference: `${wd.id}:refund`
+          });
+        }
+      }
+      writeDb(db);
+      return send(res, 200, { withdrawal: wd });
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/admin/deposits/approve') {
+      if (!requireAdmin(req, res)) return;
+      const body = await parseBody(req);
+      const dep = db.deposits.find((d) => d.id === body.depositId);
+      if (!dep) return send(res, 404, { error: 'Deposit not found' });
+      if (dep.status !== 'completed') {
+        const user = findUser(db, dep.userId);
+        if (user && !db.ledger.some((l) => l.reference === dep.id && l.type === 'deposit')) {
+          user.balance = money(user.balance + dep.amount);
+          ledger(db, {
+            userId: user.id,
+            type: 'deposit',
+            amount: dep.amount,
+            balanceAfter: user.balance,
+            reference: dep.id
+          });
+        }
+        dep.status = 'completed';
+      }
+      writeDb(db);
+      return send(res, 200, { deposit: dep });
+    }
+
     return send(res, 404, { error: 'API route not found' });
   } catch (err) {
     return send(res, 500, { error: err.message || 'Server error' });
   }
 }
+
+const STATIC_TYPES = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon'
+};
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -575,6 +898,9 @@ const server = http.createServer((req, res) => {
   if (url.pathname === '/' || url.pathname === '/index.html') {
     return serveFile(res, path.join(__dirname, 'index.html'), 'text/html; charset=utf-8');
   }
+  if (url.pathname === '/dashboard' || url.pathname === '/dashboard.html') {
+    return serveFile(res, path.join(__dirname, 'dashboard.html'), 'text/html; charset=utf-8');
+  }
 
   const filePath = path.normalize(path.join(__dirname, url.pathname));
   if (!filePath.startsWith(__dirname)) {
@@ -582,7 +908,7 @@ const server = http.createServer((req, res) => {
     return res.end('Forbidden');
   }
   const ext = path.extname(filePath).toLowerCase();
-  const type = ext === '.js' ? 'application/javascript' : ext === '.css' ? 'text/css' : 'application/octet-stream';
+  const type = STATIC_TYPES[ext] || 'application/octet-stream';
   return serveFile(res, filePath, type);
 });
 
