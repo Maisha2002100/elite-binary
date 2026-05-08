@@ -11,10 +11,16 @@ const ADMIN_KEY = process.env.ADMIN_KEY || 'change-this-admin-key';
 const JWT_SECRET = process.env.JWT_SECRET || 'change-this-jwt-secret-please';
 const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const OTP_TTL_MS = 10 * 60 * 1000; // 10 minutes
-const DATA_DIR = path.join(__dirname, 'data');
-const DB_PATH = path.join(DATA_DIR, 'db.json');
 const MPESA_ENV = (process.env.MPESA_ENV || 'sandbox').toLowerCase();
 const MPESA_HOST = MPESA_ENV === 'production' ? 'api.safaricom.co.ke' : 'sandbox.safaricom.co.ke';
+
+// Database persistence strategy
+const USE_FILE_DB = process.env.USE_FILE_DB !== 'false';
+const DB_DIR = process.env.DB_DIR || '/tmp'; // Use /tmp for AWS Lambda (writable)
+const DB_PATH = path.join(DB_DIR, 'db.json');
+
+// In-memory database (primary for Lambda, fallback for file errors)
+let memoryDb = null;
 
 const defaultDb = {
   config: {
@@ -33,25 +39,74 @@ const defaultDb = {
   otpCodes: []
 };
 
-function ensureDb() {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  if (!fs.existsSync(DB_PATH)) {
-    fs.writeFileSync(DB_PATH, JSON.stringify(defaultDb, null, 2));
+function initializeMemoryDb() {
+  if (!memoryDb) {
+    memoryDb = JSON.parse(JSON.stringify(defaultDb));
+  }
+  return memoryDb;
+}
+
+function ensureDbDir() {
+  try {
+    if (!fs.existsSync(DB_DIR)) {
+      fs.mkdirSync(DB_DIR, { recursive: true });
+    }
+  } catch (e) {
+    console.warn(`[DB] Cannot create directory ${DB_DIR}:`, e.message);
+  }
+}
+
+function readDbFromFile() {
+  try {
+    if (!USE_FILE_DB) return null;
+    ensureDbDir();
+    if (!fs.existsSync(DB_PATH)) {
+      fs.writeFileSync(DB_PATH, JSON.stringify(defaultDb, null, 2));
+    }
+    const db = JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
+    db.config = { ...defaultDb.config, ...(db.config || {}) };
+    for (const key of ['users', 'deposits', 'withdrawals', 'trades', 'ledger', 'otpCodes']) {
+      if (!Array.isArray(db[key])) db[key] = [];
+    }
+    return db;
+  } catch (e) {
+    console.warn(`[DB] File persistence error (falling back to memory):`, e.message);
+    return null;
+  }
+}
+
+function writeDbToFile(db) {
+  if (!USE_FILE_DB) return;
+  try {
+    ensureDbDir();
+    fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2));
+  } catch (e) {
+    console.warn(`[DB] Cannot write to file (using memory only):`, e.message);
   }
 }
 
 function readDb() {
-  ensureDb();
-  const db = JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
-  db.config = { ...defaultDb.config, ...(db.config || {}) };
-  for (const key of ['users', 'deposits', 'withdrawals', 'trades', 'ledger', 'otpCodes']) {
-    if (!Array.isArray(db[key])) db[key] = [];
+  // Try file first, fall back to memory
+  let db = readDbFromFile();
+  if (db) {
+    memoryDb = db; // Keep memory in sync
+    return db;
   }
-  return db;
+  
+  // Use memory database
+  const db_ = initializeMemoryDb();
+  db_.config = { ...defaultDb.config, ...(db_.config || {}) };
+  for (const key of ['users', 'deposits', 'withdrawals', 'trades', 'ledger', 'otpCodes']) {
+    if (!Array.isArray(db_[key])) db_[key] = [];
+  }
+  return db_;
 }
 
 function writeDb(db) {
-  fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2));
+  // Keep memory in sync
+  memoryDb = JSON.parse(JSON.stringify(db));
+  // Try to persist to file (best effort)
+  writeDbToFile(db);
 }
 
 function id(prefix) {
@@ -324,8 +379,6 @@ async function sendB2cPayment({ amount, destination, reference }) {
 
 // ── OTP delivery (logs to console; pluggable for Twilio/Nodemailer) ─────
 async function deliverOtp(identifier, otp) {
-  // Hook for Twilio/Nodemailer/SendGrid in production. In dev, log to console.
-  // Optional Nodemailer/Twilio integration can be wired here when env vars are set.
   console.log(`[OTP] ${identifier} → ${otp}`);
 }
 
@@ -875,6 +928,7 @@ async function routeApi(req, res) {
 
     return send(res, 404, { error: 'API route not found' });
   } catch (err) {
+    console.error('[ERROR]', err);
     return send(res, 500, { error: err.message || 'Server error' });
   }
 }
@@ -912,8 +966,12 @@ const server = http.createServer((req, res) => {
   return serveFile(res, filePath, type);
 });
 
-ensureDb();
+// Initialize in-memory database on startup
+initializeMemoryDb();
+
 server.listen(PORT, () => {
   console.log(`Elite Binary backend running at http://localhost:${PORT}`);
   console.log(`Admin key: ${ADMIN_KEY}`);
+  console.log(`Database mode: ${USE_FILE_DB ? 'File (with memory fallback)' : 'Memory only'}`);
+  console.log(`DB Path: ${DB_PATH}`);
 });
