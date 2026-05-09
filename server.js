@@ -12,6 +12,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'change-this-jwt-secret-please';
 const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const OTP_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const PAYMENT_PROVIDER = (process.env.PAYMENT_PROVIDER || 'payhero').toLowerCase();
+const DEFAULT_MOCK_PAYMENTS = String(process.env.MOCK_PAYMENTS || 'true').toLowerCase() !== 'false';
 const MPESA_ENV = (process.env.MPESA_ENV || 'sandbox').toLowerCase();
 const MPESA_HOST = MPESA_ENV === 'production' ? 'api.safaricom.co.ke' : 'sandbox.safaricom.co.ke';
 const PAYHERO_HOST = process.env.PAYHERO_HOST || 'backend.payhero.co.ke';
@@ -19,6 +20,10 @@ const DEFAULT_DEPOSIT_WALLET = 'I & M Bank Limited 06509279966150 / Channel ID 8
 const LEGACY_DEPOSIT_WALLETS = new Set([
   'NCBA Loop 440200250861 / Channel ID 7598'
 ]);
+const SUPABASE_URL = (process.env.SUPABASE_URL || '').replace(/\/$/, '');
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || '';
+const SUPABASE_DB_TABLE = process.env.SUPABASE_DB_TABLE || 'app_state';
+const SUPABASE_DB_ID = process.env.SUPABASE_DB_ID || 'elite-binary';
 
 // Database persistence strategy
 const USE_FILE_DB = process.env.USE_FILE_DB !== 'false';
@@ -35,7 +40,7 @@ const defaultDb = {
     winProbability: 0.5,
     settlementDelayMs: 900,
     designatedWallet: DEFAULT_DEPOSIT_WALLET,
-    mockPayments: true
+    mockPayments: DEFAULT_MOCK_PAYMENTS
   },
   users: [],
   deposits: [],
@@ -94,30 +99,100 @@ function writeDbToFile(db) {
   }
 }
 
-function readDb() {
-  // Try file first, fall back to memory
+function normalizeDb(db) {
+  const normalized = db || JSON.parse(JSON.stringify(defaultDb));
+  normalized.config = { ...defaultDb.config, ...(normalized.config || {}) };
+  if (!normalized.config.designatedWallet || LEGACY_DEPOSIT_WALLETS.has(normalized.config.designatedWallet)) {
+    normalized.config.designatedWallet = DEFAULT_DEPOSIT_WALLET;
+  }
+  for (const key of ['users', 'deposits', 'withdrawals', 'trades', 'ledger', 'otpCodes']) {
+    if (!Array.isArray(normalized[key])) normalized[key] = [];
+  }
+  return normalized;
+}
+
+function hasSupabaseDb() {
+  return Boolean(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY);
+}
+
+function supabaseRequest(method, requestPath, payload) {
+  return new Promise((resolve, reject) => {
+    const endpoint = new URL(SUPABASE_URL);
+    const raw = payload === undefined ? '' : JSON.stringify(payload);
+    const req = https.request({
+      hostname: endpoint.hostname,
+      path: requestPath,
+      method,
+      headers: {
+        apikey: SUPABASE_SERVICE_ROLE_KEY,
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        'Content-Type': 'application/json',
+        ...(raw ? { 'Content-Length': Buffer.byteLength(raw) } : {}),
+        ...(method === 'POST' ? { Prefer: 'resolution=merge-duplicates' } : {})
+      }
+    }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        let parsed = null;
+        try { parsed = data ? JSON.parse(data) : {}; } catch (_) { parsed = { raw: data }; }
+        if (res.statusCode >= 200 && res.statusCode < 300) return resolve(parsed);
+        reject(new Error(parsed.message || parsed.error || `Supabase request failed with ${res.statusCode}`));
+      });
+    });
+    req.on('error', reject);
+    if (payload !== undefined) req.write(raw);
+    req.end();
+  });
+}
+
+async function readDbFromSupabase() {
+  if (!hasSupabaseDb()) return null;
+  const path_ = `/rest/v1/${encodeURIComponent(SUPABASE_DB_TABLE)}?id=eq.${encodeURIComponent(SUPABASE_DB_ID)}&select=data&limit=1`;
+  const rows = await supabaseRequest('GET', path_);
+  if (!Array.isArray(rows) || !rows[0]) return null;
+  return rows[0].data;
+}
+
+async function writeDbToSupabase(db) {
+  if (!hasSupabaseDb()) return;
+  await supabaseRequest('POST', `/rest/v1/${encodeURIComponent(SUPABASE_DB_TABLE)}?on_conflict=id`, {
+    id: SUPABASE_DB_ID,
+    data: db,
+    updated_at: now()
+  });
+}
+
+async function readDb() {
+  if (hasSupabaseDb()) {
+    try {
+      const storedDb = await readDbFromSupabase();
+      const supabaseDb = normalizeDb(storedDb);
+      memoryDb = supabaseDb;
+      if (!storedDb) await writeDbToSupabase(supabaseDb);
+      return supabaseDb;
+    } catch (e) {
+      console.warn('[DB] Supabase persistence error (falling back to file/memory):', e.message);
+    }
+  }
+
   let db = readDbFromFile();
   if (db) {
+    db = normalizeDb(db);
     memoryDb = db; // Keep memory in sync
     return db;
   }
   
-  // Use memory database
-  const db_ = initializeMemoryDb();
-  db_.config = { ...defaultDb.config, ...(db_.config || {}) };
-  if (!db_.config.designatedWallet || LEGACY_DEPOSIT_WALLETS.has(db_.config.designatedWallet)) {
-    db_.config.designatedWallet = DEFAULT_DEPOSIT_WALLET;
-  }
-  for (const key of ['users', 'deposits', 'withdrawals', 'trades', 'ledger', 'otpCodes']) {
-    if (!Array.isArray(db_[key])) db_[key] = [];
-  }
+  const db_ = normalizeDb(initializeMemoryDb());
   return db_;
 }
 
-function writeDb(db) {
-  // Keep memory in sync
+async function writeDb(db) {
   memoryDb = JSON.parse(JSON.stringify(db));
-  // Try to persist to file (best effort)
+  if (hasSupabaseDb()) {
+    await writeDbToSupabase(db);
+    return;
+  }
   writeDbToFile(db);
 }
 
@@ -496,7 +571,7 @@ async function routeApi(req, res) {
   if (req.method === 'OPTIONS') return send(res, 200, { ok: true });
 
   const url = new URL(req.url, `http://${req.headers.host}`);
-  const db = readDb();
+  const db = await readDb();
 
   try {
     // ── Public ────────────────────────────────────────────────────────
@@ -543,7 +618,7 @@ async function routeApi(req, res) {
         balanceAfter: user.balance,
         reference: 'initial'
       });
-      writeDb(db);
+      await writeDb(db);
 
       const token = signToken({ userId: user.id });
       return send(res, 200, { user: publicUser(user), token });
@@ -581,7 +656,7 @@ async function routeApi(req, res) {
           balanceAfter: user.balance,
           reference: 'initial'
         });
-        writeDb(db);
+        await writeDb(db);
       }
 
       if (!user) return send(res, 404, { error: 'Account not found. Please register first.' });
@@ -617,7 +692,7 @@ async function routeApi(req, res) {
         expiresAt: new Date(Date.now() + OTP_TTL_MS).toISOString()
       };
       db.otpCodes.push(record);
-      writeDb(db);
+      await writeDb(db);
       await deliverOtp(identifier, otp);
       const devEcho = String(process.env.OTP_DEV_ECHO || 'true').toLowerCase() !== 'false';
       return send(res, 200, { ok: true, expiresAt: record.expiresAt, ...(devEcho ? { devOtp: otp } : {}) });
@@ -639,7 +714,7 @@ async function routeApi(req, res) {
       record.verifiedAt = now();
       const user = findUserByIdentifier(db, identifier);
       if (user) user.verified = true;
-      writeDb(db);
+      await writeDb(db);
       return send(res, 200, { ok: true, verified: true });
     }
 
@@ -660,7 +735,7 @@ async function routeApi(req, res) {
       if (!record) return send(res, 400, { error: 'Invalid or expired OTP' });
       record.verified = true;
       user.passwordHash = hashPassword(newPassword);
-      writeDb(db);
+      await writeDb(db);
       const token = signToken({ userId: user.id });
       return send(res, 200, { ok: true, user: publicUser(user), token });
     }
@@ -741,7 +816,7 @@ async function routeApi(req, res) {
         });
       }
 
-      writeDb(db);
+      await writeDb(db);
       return send(res, 200, {
         deposit,
         user: publicUser(user),
@@ -781,7 +856,7 @@ async function routeApi(req, res) {
           });
         }
       }
-      writeDb(db);
+      await writeDb(db);
       return send(res, 200, { ok: true });
     }
 
@@ -807,7 +882,7 @@ async function routeApi(req, res) {
           });
         }
       }
-      writeDb(db);
+      await writeDb(db);
       return send(res, 200, { ok: true });
     }
 
@@ -859,7 +934,7 @@ async function routeApi(req, res) {
         createdAt: now()
       };
       db.trades.push(trade);
-      writeDb(db);
+      await writeDb(db);
       return send(res, 200, { trade, user: publicUser(user), config: db.config });
     }
 
@@ -906,7 +981,7 @@ async function routeApi(req, res) {
         balanceAfter: user.balance,
         reference: withdrawal.id
       });
-      writeDb(db);
+      await writeDb(db);
       return send(res, 200, { withdrawal, user: publicUser(user) });
     }
 
@@ -933,7 +1008,7 @@ async function routeApi(req, res) {
           });
         }
       }
-      writeDb(db);
+      await writeDb(db);
       return send(res, 200, { ok: true });
     }
 
@@ -968,7 +1043,7 @@ async function routeApi(req, res) {
       if (body.mockPayments !== undefined) {
         db.config.mockPayments = Boolean(body.mockPayments);
       }
-      writeDb(db);
+      await writeDb(db);
       return send(res, 200, { config: db.config });
     }
 
@@ -978,7 +1053,7 @@ async function routeApi(req, res) {
       const user = findUser(db, body.userId);
       if (!user) return send(res, 404, { error: 'User not found' });
       user.suspended = Boolean(body.suspended ?? true);
-      writeDb(db);
+      await writeDb(db);
       return send(res, 200, { user: publicUser(user) });
     }
 
@@ -1004,7 +1079,7 @@ async function routeApi(req, res) {
           });
         }
       }
-      writeDb(db);
+      await writeDb(db);
       return send(res, 200, { withdrawal: wd });
     }
 
@@ -1027,7 +1102,7 @@ async function routeApi(req, res) {
         }
         dep.status = 'completed';
       }
-      writeDb(db);
+      await writeDb(db);
       return send(res, 200, { deposit: dep });
     }
 
@@ -1077,6 +1152,6 @@ initializeMemoryDb();
 server.listen(PORT, () => {
   console.log(`Elite Binary backend running at http://localhost:${PORT}`);
   console.log(`Admin key: ${ADMIN_KEY}`);
-  console.log(`Database mode: ${USE_FILE_DB ? 'File (with memory fallback)' : 'Memory only'}`);
-  console.log(`DB Path: ${DB_PATH}`);
+  console.log(`Database mode: ${hasSupabaseDb() ? 'Supabase Postgres' : USE_FILE_DB ? 'File (with memory fallback)' : 'Memory only'}`);
+  console.log(`DB Path: ${hasSupabaseDb() ? `${SUPABASE_DB_TABLE}/${SUPABASE_DB_ID}` : DB_PATH}`);
 });

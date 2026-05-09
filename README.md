@@ -37,6 +37,20 @@ The admin panel in the app can update:
 - Designated deposit wallet
 - Mock payment mode
 
+## Production Database
+
+Local development uses `db.json`, but Vercel's filesystem is ephemeral. For production, create a Supabase project, run `supabase-schema.sql` in the Supabase SQL editor, then set:
+
+```bash
+set SUPABASE_URL=https://your-project-ref.supabase.co
+set SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+set SUPABASE_DB_TABLE=app_state
+set SUPABASE_DB_ID=elite-binary
+set MOCK_PAYMENTS=false
+```
+
+When these variables are present, the backend stores the full JSON database in Supabase Postgres as a `jsonb` document and shares it across Vercel function invocations. Keep `SUPABASE_SERVICE_ROLE_KEY` server-only.
+
 ## Payment Notes
 
 `mockPayments` is enabled by default. In this mode:
