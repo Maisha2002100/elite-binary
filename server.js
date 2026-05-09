@@ -11,8 +11,14 @@ const ADMIN_KEY = process.env.ADMIN_KEY || 'change-this-admin-key';
 const JWT_SECRET = process.env.JWT_SECRET || 'change-this-jwt-secret-please';
 const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const OTP_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const PAYMENT_PROVIDER = (process.env.PAYMENT_PROVIDER || 'payhero').toLowerCase();
 const MPESA_ENV = (process.env.MPESA_ENV || 'sandbox').toLowerCase();
 const MPESA_HOST = MPESA_ENV === 'production' ? 'api.safaricom.co.ke' : 'sandbox.safaricom.co.ke';
+const PAYHERO_HOST = process.env.PAYHERO_HOST || 'backend.payhero.co.ke';
+const DEFAULT_DEPOSIT_WALLET = 'I & M Bank Limited 06509279966150 / Channel ID 8005';
+const LEGACY_DEPOSIT_WALLETS = new Set([
+  'NCBA Loop 440200250861 / Channel ID 7598'
+]);
 
 // Database persistence strategy
 const USE_FILE_DB = process.env.USE_FILE_DB !== 'false';
@@ -28,7 +34,7 @@ const defaultDb = {
     payoutRate: 0.9,
     winProbability: 0.5,
     settlementDelayMs: 900,
-    designatedWallet: 'NCBA Loop 440200250861 / Channel ID 7598',
+    designatedWallet: DEFAULT_DEPOSIT_WALLET,
     mockPayments: true
   },
   users: [],
@@ -65,6 +71,9 @@ function readDbFromFile() {
     }
     const db = JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
     db.config = { ...defaultDb.config, ...(db.config || {}) };
+    if (!db.config.designatedWallet || LEGACY_DEPOSIT_WALLETS.has(db.config.designatedWallet)) {
+      db.config.designatedWallet = DEFAULT_DEPOSIT_WALLET;
+    }
     for (const key of ['users', 'deposits', 'withdrawals', 'trades', 'ledger', 'otpCodes']) {
       if (!Array.isArray(db[key])) db[key] = [];
     }
@@ -96,6 +105,9 @@ function readDb() {
   // Use memory database
   const db_ = initializeMemoryDb();
   db_.config = { ...defaultDb.config, ...(db_.config || {}) };
+  if (!db_.config.designatedWallet || LEGACY_DEPOSIT_WALLETS.has(db_.config.designatedWallet)) {
+    db_.config.designatedWallet = DEFAULT_DEPOSIT_WALLET;
+  }
   for (const key of ['users', 'deposits', 'withdrawals', 'trades', 'ledger', 'otpCodes']) {
     if (!Array.isArray(db_[key])) db_[key] = [];
   }
@@ -331,7 +343,7 @@ function normalizePhone(phone) {
 }
 
 async function initiateStkPush({ amount, phone, accountReference }) {
-  const shortCode = process.env.MPESA_SHORTCODE;
+  const shortCode = process.env.MPESA_SHORTCODE || process.env.MPESA_CHANNEL_ID;
   const passkey = process.env.MPESA_PASSKEY;
   const callbackUrl = process.env.MPESA_CALLBACK_URL;
   if (!shortCode || !passkey || !callbackUrl) throw new Error('M-Pesa STK settings are not configured');
@@ -350,6 +362,57 @@ async function initiateStkPush({ amount, phone, accountReference }) {
     AccountReference: accountReference,
     TransactionDesc: 'Elite Binary deposit'
   }, token);
+}
+
+function payheroRequest(method, requestPath, payload) {
+  const token = process.env.PAYHERO_BASIC_AUTH;
+  if (!token) throw new Error('PayHero credentials are not configured');
+  const authorization = /^Basic\s+/i.test(token) ? token : `Basic ${token}`;
+  return new Promise((resolve, reject) => {
+    const raw = payload ? JSON.stringify(payload) : '';
+    const req = https.request({
+      hostname: PAYHERO_HOST,
+      path: requestPath,
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(raw),
+        Authorization: authorization
+      }
+    }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        let parsed = {};
+        try { parsed = data ? JSON.parse(data) : {}; } catch (_) { parsed = { raw: data }; }
+        if (res.statusCode >= 200 && res.statusCode < 300) return resolve(parsed);
+        reject(new Error(parsed.message || parsed.error || `PayHero request failed with ${res.statusCode}`));
+      });
+    });
+    req.on('error', reject);
+    if (raw) req.write(raw);
+    req.end();
+  });
+}
+
+async function initiatePayheroStkPush({ amount, phone, accountReference, customerName }) {
+  const channelId = process.env.PAYHERO_CHANNEL_ID || process.env.MPESA_CHANNEL_ID || process.env.MPESA_SHORTCODE;
+  const callbackUrl = process.env.PAYHERO_CALLBACK_URL || process.env.MPESA_CALLBACK_URL;
+  const provider = process.env.PAYHERO_PROVIDER || 'm-pesa';
+  if (!channelId || !callbackUrl) throw new Error('PayHero STK settings are not configured');
+  const payload = {
+    amount: Math.round(Number(amount)),
+    phone_number: phone,
+    channel_id: Number(channelId),
+    provider,
+    external_reference: accountReference,
+    customer_name: customerName || 'Elite Binary customer',
+    callback_url: callbackUrl
+  };
+  if (provider === 'sasapay') {
+    payload.network_code = process.env.PAYHERO_NETWORK_CODE || '63902';
+  }
+  return payheroRequest('POST', '/api/v2/payments', payload);
 }
 
 async function sendB2cPayment({ amount, destination, reference }) {
@@ -645,13 +708,21 @@ async function routeApi(req, res) {
         amount,
         status: db.config.mockPayments ? 'completed' : 'pending_stk',
         providerReference: null,
+        paymentProvider: db.config.mockPayments ? 'mock' : PAYMENT_PROVIDER,
         wallet: db.config.designatedWallet,
         createdAt: now()
       };
 
       if (!db.config.mockPayments && deposit.method === 'mpesa') {
-        const stk = await initiateStkPush({ amount, phone: deposit.phone, accountReference: deposit.id });
-        deposit.providerReference = stk.CheckoutRequestID || stk.MerchantRequestID || id('stk');
+        const stk = PAYMENT_PROVIDER === 'mpesa'
+          ? await initiateStkPush({ amount, phone: deposit.phone, accountReference: deposit.id })
+          : await initiatePayheroStkPush({
+              amount,
+              phone: deposit.phone,
+              accountReference: deposit.id,
+              customerName: user.name || user.identifier
+            });
+        deposit.providerReference = stk.CheckoutRequestID || stk.reference || stk.MerchantRequestID || id('stk');
         deposit.providerResponse = stk;
       } else {
         deposit.providerReference = id('stk');
@@ -678,6 +749,40 @@ async function routeApi(req, res) {
           ? 'Mock STK push completed and wallet credited.'
           : 'STK push initiated. Credit wallet from the provider callback.'
       });
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/payhero/callback') {
+      const body = await parseBody(req);
+      const callback = body.response || body;
+      const externalReference = callback.ExternalReference || callback.external_reference || body.user_reference;
+      const checkoutId = callback.CheckoutRequestID || callback.reference;
+      const resultCode = Number(callback.ResultCode);
+      const status = String(callback.Status || body.status || '').toLowerCase();
+      const deposit = db.deposits.find((d) =>
+        d.id === externalReference ||
+        d.providerReference === checkoutId ||
+        d.providerReference === callback.MerchantRequestID
+      );
+      if (!deposit) return send(res, 200, { ok: true, ignored: true });
+      deposit.callback = body;
+      deposit.paymentProvider = 'payhero';
+      deposit.providerReceipt = callback.MpesaReceiptNumber || callback.providerReference || deposit.providerReceipt;
+      deposit.status = (resultCode === 0 || status === 'success' || body.paymentSuccess === true) ? 'completed' : 'failed';
+      if (deposit.status === 'completed') {
+        const user = findUser(db, deposit.userId);
+        if (user && !db.ledger.some((l) => l.reference === deposit.id && l.type === 'deposit')) {
+          user.balance = money(user.balance + deposit.amount);
+          ledger(db, {
+            userId: user.id,
+            type: 'deposit',
+            amount: deposit.amount,
+            balanceAfter: user.balance,
+            reference: deposit.id
+          });
+        }
+      }
+      writeDb(db);
+      return send(res, 200, { ok: true });
     }
 
     if (req.method === 'POST' && url.pathname === '/api/mpesa/stk-callback') {

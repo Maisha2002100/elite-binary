@@ -4,7 +4,7 @@
     "payoutRate": 0.9,
     "winProbability": 0.5,
     "settlementDelayMs": 900,
-    "designatedWallet": "NCBA Loop 440200250861 / Channel ID 7598",
+    "designatedWallet": "I & M Bank Limited 06509279966150 / Channel ID 8005",
     "mockPayments": true
   },
   "users": [

@@ -1265,16 +1265,27 @@ function updDepInfo(){
   document.getElementById('ds-send').textContent='$'+a.toFixed(2);
   document.getElementById('ds-recv').textContent='$'+a.toFixed(2);
 }
-function doDep(){
+async function doDep(){
+  const amt=parseFloat(document.getElementById('dep-amt').value);
   const c=document.getElementById('dep-contact').value.trim();
   const msg=document.getElementById('dep-msg');
-  if(!c){msg.style.color='var(--red)';msg.textContent='Please enter contact info';return;}
-  msg.style.color='var(--text3)';msg.textContent='Redirecting…';
-  setTimeout(()=>{
-    window.open('https://app.deriv.com/cashier/deposit','_blank');
-    msg.style.color='var(--green)';msg.textContent='✓ Complete payment in the new tab';
+  if(depMethod!=='mpesa'){msg.style.color='var(--red)';msg.textContent='Only M-Pesa STK push is available';return;}
+  if(!amt||amt<10){msg.style.color='var(--red)';msg.textContent='Minimum $10';return;}
+  if(!c){msg.style.color='var(--red)';msg.textContent='Enter M-Pesa phone number';return;}
+  msg.style.color='var(--text3)';msg.textContent='Sending STK push…';
+  const res=await apiCall('/deposits','POST',{amount:amt,phone:c,method:'mpesa'});
+  if(res&&!res.error){
+    currentUser={...currentUser,...res.user};
+    if(currentUser)localStorage.setItem('eliteBinaryUser',JSON.stringify(currentUser));
+    balance=Number(currentUser.balance||balance);
+    updateBalDisp();
+    msg.style.color='var(--green)';
+    msg.textContent=res.deposit?.status==='completed'?'✓ Deposit credited':'✓ STK push sent to your phone';
     loadWallet();
-  },1200);
+  }else{
+    msg.style.color='var(--red)';
+    msg.textContent=res?.error||'STK push failed';
+  }
 }
 async function doWd(){
   const amt=parseFloat(document.getElementById('wd-amt').value);
