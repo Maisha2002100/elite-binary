@@ -189,7 +189,7 @@ Get platform configuration.
     "payoutRate": 0.9,
     "winProbability": 0.5,
     "settlementDelayMs": 900,
-    "designatedWallet": "NCBA Loop 440200250861",
+    "designatedWallet": "im"
     "mockPayments": true
   }
 }
@@ -311,6 +311,27 @@ M-Pesa STK push callback (webhook).
       "ResultDesc": "The service request has been processed successfully."
     }
   }
+}
+```
+
+---
+
+### POST /payhero/callback
+PayHero STK push callback (webhook).
+
+**Request:**
+```json
+{
+  "response": {
+    "Amount": 10,
+    "CheckoutRequestID": "ws_CO_14012024103543427709099876",
+    "ExternalReference": "dep_abc123",
+    "MpesaReceiptNumber": "SAE3YULR0Y",
+    "Phone": "+254709099876",
+    "ResultCode": 0,
+    "Status": "Success"
+  },
+  "status": true
 }
 ```
 
