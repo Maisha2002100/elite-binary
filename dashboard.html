@@ -1270,7 +1270,7 @@ async function doDep(){
   const c=document.getElementById('dep-contact').value.trim();
   const msg=document.getElementById('dep-msg');
   if(depMethod!=='mpesa'){msg.style.color='var(--red)';msg.textContent='Only M-Pesa STK push is available';return;}
-  if(!amt||amt<10){msg.style.color='var(--red)';msg.textContent='Minimum sh 100';return;}
+  if(!amt||amt<10){msg.style.color='var(--red)';msg.textContent='Minimum USD 5';return;}
   if(!c){msg.style.color='var(--red)';msg.textContent='Enter M-Pesa phone number';return;}
   msg.style.color='var(--text3)';msg.textContent='Sending STK push…';
   const res=await apiCall('/deposits','POST',{amount:amt,phone:c,method:'mpesa'});
@@ -1291,7 +1291,7 @@ async function doWd(){
   const amt=parseFloat(document.getElementById('wd-amt').value);
   const ph=document.getElementById('wd-phone').value;
   const msg=document.getElementById('wd-msg');
-  if(!amt||amt<10){msg.style.color='var(--red)';msg.textContent='Minimum  Sh 100';return;}
+  if(!amt||amt<10){msg.style.color='var(--red)';msg.textContent='Minimum  USD 5';return;}
   if(!ph){msg.style.color='var(--red)';msg.textContent='Enter phone number';return;}
   if(amt>balance){msg.style.color='var(--red)';msg.textContent='Insufficient balance';return;}
   msg.style.color='var(--text3)';msg.textContent='Processing…';
