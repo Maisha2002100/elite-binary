@@ -441,58 +441,6 @@ img{max-width:100%;display:block}
   .ai-section .ai-copy{order:-1}
   .footer{flex-direction:column;align-items:flex-start;gap:12px}
 }
-  .password-group{
-  position:relative;
-  width:100%;
-  margin-bottom:16px;
-}
-
-.password-group input{
-  width:100%;
-  background:var(--bg2);
-  border:1px solid var(--border);
-  color:var(--text);
-  border-radius:8px;
-  padding:14px 46px 14px 16px;
-  font-size:1rem;
-}
-
-.toggle-password{
-  position:absolute;
-  right:14px;
-  top:50%;
-  transform:translateY(-50%);
-  cursor:pointer;
-  opacity:.7;
-  font-size:.9rem;
-}
-
-.toggle-password:hover{
-  opacity:1;
-}
-
-.terms-wrap{
-  margin-bottom:16px;
-}
-
-.terms-label{
-  display:flex;
-  align-items:flex-start;
-  gap:10px;
-  font-size:.84rem;
-  color:var(--text2);
-  line-height:1.5;
-}
-
-.terms-label input{
-  width:16px;
-  height:16px;
-  margin-top:2px;
-}
-
-.terms-label a{
-  color:var(--blue);
-}
 </style>
 </head>
 <body>
@@ -521,80 +469,21 @@ img{max-width:100%;display:block}
     <p id="modal-subtitle" class="modal-subtitle">Access your trading account</p>
     
     <div class="auth-form">
-
-  <!-- FULL NAME -->
-  <input
-    type="text"
-    id="auth-name"
-    placeholder="Full Name"
-    style="display:none;"
-  >
-
-  <!-- EMAIL / PHONE -->
-  <input
-    type="text"
-    id="auth-identifier"
-    placeholder="Email or Phone"
-    autocomplete="username"
-  >
-
-  <!-- PASSWORD -->
-  <input
-    type="password"
-    id="auth-password"
-    placeholder="Password"
-    style="display:none;"
-  >
-
-  <!-- CONFIRM PASSWORD -->
-  <input
-    type="password"
-    id="auth-confirm-password"
-    placeholder="Confirm Password"
-    style="display:none;"
-  >
-
-  <!-- VERIFICATION CODE -->
-  <input
-    type="text"
-    id="auth-code"
-    placeholder="Verification Code"
-    style="display:none;"
-  >
-
-  <!-- TERMS -->
-  <label
-    id="terms-box"
-    style="
-      display:none;
-      align-items:center;
-      gap:10px;
-      font-size:.82rem;
-      color:var(--text2);
-      margin-bottom:16px;
-    "
-  >
-    <input type="checkbox" id="terms-check">
-
-    <span>
-      I agree to the
-      <a href="#" style="color:var(--blue)">Terms of Service</a>
-      and
-      <a href="#" style="color:var(--blue)">Privacy Policy</a>
-    </span>
-  </label>
-
-  <!-- BUTTON -->
-  <button id="auth-submit" onclick="handleAuth()">
-    Login
-  </button>
-
-  <!-- SWITCH -->
-  <div class="toggle-auth">
-    Don't have an account?
-    <span onclick="toggleAuthMode()">Register</span>
+      <input type="text" id="auth-identifier" placeholder="Phone / Email / Username" autocomplete="username">
+      <input type="text" id="auth-name" placeholder="Your Name" style="display:none;">
+      <input type="password" id="auth-password" placeholder="Password" autocomplete="current-password">
+      <input type="text" id="auth-otp" placeholder="6-digit OTP code" maxlength="6" style="display:none;">
+      <button id="auth-submit" onclick="handleAuth()">Login</button>
+      <div class="toggle-auth">
+        Don't have an account? <span onclick="toggleAuthMode()">Register</span>
+      </div>
+      <div class="toggle-auth" style="margin-top:8px">
+        <span id="forgot-link" onclick="startForgotPassword()">Forgot password?</span>
+      </div>
+      <div id="auth-error" style="display:none;color:var(--red);font-size:.85rem;margin-top:8px;text-align:center"></div>
+    </div>
   </div>
-
+</div>
 
 <!-- HERO -->
 <section class="hero">
@@ -877,53 +766,12 @@ function setError(msg) {
 
 // ── Auth modal ───────────────────────────────────────────────────────
 function showAuthModal(mode) {
-function showAuthModal(mode) {
-
-  const modal = document.getElementById('auth-modal');
-
-  authMode = mode === 'demo'
-    ? 'register'
-    : mode;
-
-  const isRegister = authMode === 'register';
-
-  document.getElementById('modal-title').textContent =
-    isRegister
-      ? 'Create Account'
-      : 'Login';
-
-  document.getElementById('modal-subtitle').textContent =
-    isRegister
-      ? 'Fill in your details to get started'
-      : 'Access your trading account';
-
-  // REGISTER FIELDS
-  document.getElementById('auth-name').style.display =
-    isRegister ? 'block' : 'none';
-
-  document.getElementById('auth-password').style.display =
-    isRegister ? 'block' : 'none';
-
-  document.getElementById('auth-confirm-password').style.display =
-    isRegister ? 'block' : 'none';
-
-  document.getElementById('terms-box').style.display =
-    isRegister ? 'flex' : 'none';
-
-  // ALWAYS HIDE CODE INITIALLY
-  document.getElementById('auth-code').style.display = 'none';
-
-  document.getElementById('auth-submit').textContent =
-    isRegister
-      ? 'Create Account'
-      : 'Login';
-
-  document.querySelector('.toggle-auth').innerHTML =
-    isRegister
-      ? `Already have an account? <span onclick="toggleAuthMode()">Login</span>`
-      : `Don't have an account? <span onclick="toggleAuthMode()">Register</span>`;
-
+  const modal = $('auth-modal');
+  authMode = mode === 'demo' ? 'demo' : (mode || 'login');
+  applyAuthModeUI();
+  setError('');
   modal.style.display = 'flex';
+  $('auth-identifier').focus();
 }
 
 function applyAuthModeUI() {
@@ -960,9 +808,9 @@ function applyAuthModeUI() {
   $('auth-password').style.display = (isOtp || isForgot) ? 'none' : 'block';
   $('auth-password').placeholder = isReset ? 'New password (min 6 chars)' : 'Password';
   $('auth-password').autocomplete = isRegister || isReset ? 'new-password' : 'current-password';
-  $('auth-otp').style.display = (isOtp || isReset) ? 'block' : 'none'; 
+  $('auth-otp').style.display = (isOtp || isReset) ? 'block' : 'none';
 
-  const toggle = document.querySelector('.toggle-auth 
+  const toggle = document.querySelector('.toggle-auth');
   if (isRegister || isDemo) {
     toggle.innerHTML = `Already have an account? <span onclick="toggleAuthMode()">Login</span>`;
   } else if (isOtp || isForgot || isReset) {
@@ -974,18 +822,14 @@ function applyAuthModeUI() {
 }
 
 function hideAuthModal() {
-
-  document.getElementById('auth-modal').style.display =
-    'none';
-
-  document.getElementById('auth-identifier').value = '';
-  document.getElementById('auth-name').value = '';
-  document.getElementById('auth-password').value = '';
-  document.getElementById('auth-confirm-password').value = '';
-  document.getElementById('auth-code').value = '';
-
-  document.getElementById('terms-check').checked = false;
+  $('auth-modal').style.display = 'none';
+  $('auth-identifier').value = '';
+  $('auth-name').value = '';
+  $('auth-password').value = '';
+  $('auth-otp').value = '';
+  setError('');
 }
+
 function toggleAuthMode() {
   authMode = (authMode === 'login') ? 'register' : 'login';
   applyAuthModeUI();
@@ -1035,175 +879,96 @@ function clearSession() {
 
 // ── Auth submit ──────────────────────────────────────────────────────
 async function handleAuth() {
-async function handleAuth() {
+  const submitBtn = $('auth-submit');
+  const identifier = $('auth-identifier').value.trim();
+  const name = $('auth-name').value.trim();
+  const password = $('auth-password').value;
+  const otp = $('auth-otp').value.trim();
 
-  const identifier =
-    document.getElementById('auth-identifier').value.trim();
-
-  const name =
-    document.getElementById('auth-name').value.trim();
-
-  const password =
-    document.getElementById('auth-password').value.trim();
-
-  const confirmPassword =
-    document.getElementById('auth-confirm-password').value.trim();
-
-  const codeInput =
-    document.getElementById('auth-code').value.trim();
-
-  const termsAccepted =
-    document.getElementById('terms-check').checked;
-
-  const submitBtn =
-    document.getElementById('auth-submit');
-
-  if (!identifier) {
-    alert('Please enter email or phone');
-    return;
-  }
-
+  setError('');
   submitBtn.disabled = true;
+  const prevText = submitBtn.textContent;
+  submitBtn.textContent = 'Processing...';
 
-  // VERIFY STEP
-  if (
-    document.getElementById('auth-code').style.display === 'block'
-  ) {
-
-    if (!verifyCode(codeInput)) {
-
-      alert('Invalid verification code');
-
-      submitBtn.disabled = false;
-
+  try {
+    if (authMode === 'demo') {
+      if (!identifier) throw new Error('Enter an email/phone/username');
+      const data = await api('/auth/register', {
+        identifier, name: name || identifier, demo: true
+      });
+      onAuthSuccess(data);
       return;
     }
-
-    currentUser = pendingUser;
-
-    saveSession(currentUser);
-
-    updateLoggedInUI();
-
-    hideAuthModal();
-
-    alert(`Welcome ${currentUser.name}`);
-
-    window.location.href = 'dashboard.html';
-
-    return;
-  }
-
-  let users = getUsers();
-
-  // REGISTER
-  if (authMode === 'register') {
-
-    if (!name) {
-      alert('Please enter full name');
-      submitBtn.disabled = false;
+    if (authMode === 'register') {
+      if (!identifier) throw new Error('Enter an email/phone/username');
+      if (!name) throw new Error('Enter your name');
+      if (!password || password.length < 6) throw new Error('Password must be at least 6 characters');
+      const data = await api('/auth/register', { identifier, name, password, demo: false });
+      onAuthSuccess(data);
       return;
     }
-
-    if (!password || password.length < 6) {
-      alert('Password must be at least 6 characters');
-      submitBtn.disabled = false;
+    if (authMode === 'login') {
+      if (!identifier) throw new Error('Enter your email/phone/username');
+      const data = await api('/auth/login', { identifier, password });
+      onAuthSuccess(data);
       return;
     }
-
-    if (password !== confirmPassword) {
-      alert('Passwords do not match');
-      submitBtn.disabled = false;
+    if (authMode === 'forgot') {
+      if (!identifier) throw new Error('Enter your email/phone');
+      const data = await api('/auth/request-otp', { identifier });
+      pendingIdentifier = identifier;
+      authMode = 'reset';
+      applyAuthModeUI();
+      const note = data.devOtp ? ` (dev code: ${data.devOtp})` : '';
+      setError(`OTP sent.${note} Enter it below with your new password.`);
       return;
     }
-
-    if (!termsAccepted) {
-      alert('You must accept Terms and Conditions');
-      submitBtn.disabled = false;
+    if (authMode === 'reset') {
+      if (!pendingIdentifier) throw new Error('Restart the reset flow');
+      if (!otp) throw new Error('Enter the OTP code');
+      if (!password || password.length < 6) throw new Error('Password must be at least 6 characters');
+      const data = await api('/auth/reset-password', {
+        identifier: pendingIdentifier, otp, newPassword: password
+      });
+      onAuthSuccess(data);
       return;
     }
-
-    const exists = users.find(
-      user =>
-        user.identifier.toLowerCase() ===
-        identifier.toLowerCase()
-    );
-
-    if (exists) {
-
-      alert('Account already exists');
-
-      submitBtn.disabled = false;
-
+    if (authMode === 'otp') {
+      if (!pendingIdentifier) throw new Error('Restart verification');
+      const data = await api('/auth/verify-otp', { identifier: pendingIdentifier, otp });
+      setError('Verified. You can now login.');
+      authMode = 'login';
+      applyAuthModeUI();
       return;
     }
-
-    const newUser = {
-
-      id: 'EB-' + Date.now(),
-
-      name,
-
-      identifier,
-
-      password,
-
-      balance: 10000,
-
-      demo: true,
-
-      createdAt: new Date().toISOString()
-
-    };
-
-    users.push(newUser);
-
-    saveUsers(users);
-
-    pendingUser = newUser;
-
-    sendVerification(identifier);
-
-    document.getElementById('auth-code').style.display =
-      'block';
-
-    submitBtn.textContent = 'Verify Account';
-
+  } catch (err) {
+    setError(err.message);
+  } finally {
     submitBtn.disabled = false;
-
-    return;
-  }
-
-  // LOGIN
-  if (authMode === 'login') {
-
-    const existingUser = users.find(
-      user =>
-        user.identifier.toLowerCase() ===
-        identifier.toLowerCase()
-    );
-
-    if (!existingUser) {
-
-      alert('Account not found');
-
-      submitBtn.disabled = false;
-
-      return;
-    }
-
-    pendingUser = existingUser;
-
-    sendVerification(identifier);
-
-    document.getElementById('auth-code').style.display =
-      'block';
-
-    submitBtn.textContent = 'Verify Login';
-
-    submitBtn.disabled = false;
+    submitBtn.textContent = prevText;
   }
 }
+
+function onAuthSuccess(data) {
+  if (!data || !data.user || !data.token) {
+    setError('Unexpected server response');
+    return;
+  }
+  currentUser = data.user;
+  currentToken = data.token;
+  saveSession(currentUser, currentToken);
+  hideAuthModal();
+  // Redirect to dashboard
+  window.location.href = '/dashboard.html';
+}
+
+function updateLoggedInUI() {
+  document.querySelectorAll('.nav-cta, .nav-mobile-cta').forEach((btn) => {
+    btn.textContent = currentUser ? (currentUser.name || 'Account') : 'Login';
+    if (currentUser) {
+      btn.onclick = () => { window.location.href = '/dashboard.html'; };
+    }
+  });
 }
 
 // ── Restore session ──────────────────────────────────────────────────
@@ -1324,17 +1089,7 @@ document.getElementById('auth-modal').addEventListener('click', function(e) {
 });
 
 // Keyboard support
-function togglePassword(id, el) {
-  const input = document.getElementById(id);
 
-  if (input.type === 'password') {
-    input.type = 'text';
-    el.textContent = '🙈';
-  } else {
-    input.type = 'password';
-    el.textContent = '👁';
-  }
-}
 document.addEventListener('keydown', function(e) {
   if (e.key === 'Escape') {
     const modal = document.getElementById('auth-modal');
