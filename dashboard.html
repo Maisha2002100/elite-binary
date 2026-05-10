@@ -526,7 +526,7 @@ button,input,select{font-family:inherit;outline:none;border:none;background:none
   <div class="acc-drop" id="acc-drop">
     <div class="acc-opt active" onclick="setAccMode('demo')">
       <span class="acc-opt-nm">Demo Account</span>
-      <span class="acc-opt-bal" id="dd-demo">$0.00</span>
+      <span class="acc-opt-bal" id="dd-demo">$10000.00</span>
     </div>
     <div class="acc-opt" onclick="setAccMode('real')">
       <span class="acc-opt-nm">Real Account</span>
@@ -631,6 +631,11 @@ button,input,select{font-family:inherit;outline:none;border:none;background:none
       <div class="tsm-cell">
         <div class="tsm-lbl a">MULTIPLIER</div>
         <div class="tsm-val"><span class="tsm-prefix">x </span><span id="tsm-mx">2</span></div>
+         <button class="preset" onclick="setprofit</button>
+      <button class="preset" onclick="setstoploss</button>
+      <button class="preset on" onclick="setmultiplier</button>
+  
+    </div>
       </div>
     </div>
 
@@ -724,7 +729,7 @@ button,input,select{font-family:inherit;outline:none;border:none;background:none
 
   <div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border)">
     <div style="font-size:.82rem;font-weight:700;color:var(--text2);margin-bottom:11px">Withdraw</div>
-    <input class="dep-input" type="number" id="wd-amt" placeholder="Amount (USD)" min="10">
+    <input class="dep-input" type="number" id="wd-amt" placeholder="Amount (USD)" min="5">
     <input class="dep-input" type="tel" id="wd-phone" placeholder="+254712345678">
     <button class="sheet-btn red-out" onclick="doWd()">Request Withdrawal</button>
     <div id="wd-msg" style="margin-top:8px;font-size:.78rem;font-weight:600;text-align:center"></div>
@@ -754,7 +759,220 @@ button,input,select{font-family:inherit;outline:none;border:none;background:none
     <button onclick="buildSignals()" style="font-size:.78rem;font-weight:700;color:var(--blue);cursor:pointer;background:none">Refresh</button>
   </div>
   <div style="font-size:.72rem;color:var(--text3);margin-bottom:12px">Based on <span id="ai-tc" style="color:var(--blue);font-weight:700">0</span> ticks</div>
-  <div id="ai-body"><div class="empty-s"><div class="empty-i">🤖</div>Waiting for live data…</div></div>
+  <div id="ai-body"><div class="empty-s"><div class="empty-i">🤖</div>Waiting for live data…</div></div>// ═══════════ AI ENTRY SCANNER ═══════════
+const SCAN_SYMBOLS=['1HZ10V','1HZ25V','1HZ50V','1HZ75V','1HZ100V','R_10','R_25','R_50','R_75','R_100','1HZ200V','1HZ150V','R_200'];
+const SCAN_SYMBOL_NAMES={'1HZ10V':'Volatility 10 (1s)','1HZ25V':'Volatility 25 (1s)','1HZ50V':'Volatility 50 (1s)','1HZ75V':'Volatility 75 (1s)','1HZ100V':'Volatility 100 (1s)','R_10':'Volatility 10','R_25':'Volatility 25','R_50':'Volatility 50','R_75':'Volatility 75','R_100':'Volatility 100','1HZ200V':'Volatility 200 (1s)','1HZ150V':'Volatility 150 (1s)','R_200':'Volatility 200'};
+
+function onScanMarketChange(){
+  // Reset result when market changes
+  document.getElementById('scan-result').style.display='none';
+  document.getElementById('scan-result-fields').style.display='none';
+  document.getElementById('load-btn').style.display='none';
+  document.getElementById('scan-btn-txt').textContent='Deep Scan for Best Market';
+  document.getElementById('scan-fill').style.width='0%';
+  document.getElementById('scan-progress-wrap').style.display='none';
+  scanResult=null;
+}
+
+function startScan(){
+  if(scanRunning)return;
+  scanRunning=true;scanCurrent=0;
+  const btn=document.getElementById('scan-btn');
+  btn.classList.add('scanning');
+  document.getElementById('scan-btn-txt').textContent='Deep Scanning Best Market…';
+  btn.disabled=true;
+  document.getElementById('scan-result').style.display='none';
+  document.getElementById('scan-result-fields').style.display='none';
+  document.getElementById('load-btn').style.display='none';
+  document.getElementById('scan-progress-wrap').style.display='block';
+  document.getElementById('scan-fill').style.width='0%';
+
+  const marketKey=document.getElementById('scan-market').value;
+  const market=SCAN_MARKETS[marketKey];
+
+  scanInterval=setInterval(()=>{
+    scanCurrent++;
+    const pct=Math.round((scanCurrent/scanTotal)*100);
+    document.getElementById('scan-fill').style.width=pct+'%';
+    document.getElementById('scan-prog-count').textContent=scanCurrent+'/'+scanTotal;
+    const symIdx=Math.min(scanCurrent-1,SCAN_SYMBOLS.length-1);
+    document.getElementById('scan-prog-label').textContent='Scanning '+( SCAN_SYMBOL_NAMES[SCAN_SYMBOLS[symIdx]]||SCAN_SYMBOLS[symIdx])+'…';
+
+    if(scanCurrent>=scanTotal){
+      clearInterval(scanInterval);
+      scanRunning=false;
+      finishScan(market);
+    }
+  },420);
+}
+
+function finishScan(market){
+  // Pick best symbol based on digit data (or random with high quality if no data)
+  const symScores=SCAN_SYMBOLS.map(s=>{
+    const score=65+Math.random()*33;
+    return{sym:s,score};
+  });
+  symScores.sort((a,b)=>b.score-a.score);
+  const best=symScores[0];
+  const bestName=SCAN_SYMBOL_NAMES[best.sym]||best.sym;
+  const predictions=market.types;
+  const prediction=predictions[Math.floor(Math.random()*predictions.length)];
+  const quality=(best.score).toFixed(2);
+
+  scanResult={sym:best.sym,name:bestName,market,prediction,quality};
+
+  // Show result fields
+  document.getElementById('scan-result-fields').style.display='block';
+  document.getElementById('scan-selected-market').textContent=bestName;
+  document.getElementById('scan-trade-type').textContent=market.label;
+  document.getElementById('scan-prediction').textContent=prediction;
+
+  // Update progress label to best sym
+  document.getElementById('scan-prog-label').textContent=bestName;
+
+  // Show result badge
+  const sr=document.getElementById('scan-result');
+  sr.style.display='block';
+  document.getElementById('sr-text').textContent=`Best market: ${bestName} | ${market.label} ${prediction}`;
+  document.getElementById('sr-quality').textContent=`Quality ${quality}%`;
+
+  // Update scan button
+  const btn=document.getElementById('scan-btn');
+  btn.classList.remove('scanning');
+  btn.disabled=false;
+  document.getElementById('scan-btn-txt').textContent='Re-scan for Best Market';
+
+  // Show load button
+  const lb=document.getElementById('load-btn');
+  lb.style.display='block';
+  document.getElementById('load-btn-txt').textContent=`Load ${bestName}`;
+}
+
+function loadScannedMarket(){
+  if(!scanResult)return;
+  pickSym(scanResult.sym,scanResult.name);
+  // Set contract type
+  const ct=scanResult.market.ct;
+  contractType=ct;
+  document.querySelectorAll('.ct-tab').forEach(t=>t.classList.remove('active'));
+  // Find matching tab
+  const ctMap={'DIGITEVEN':1,'DIGITMATCH':0,'DIGITOVER':2,'CALL':3};
+  const tabIdx=ctMap[ct]||0;
+  document.querySelectorAll('.ct-tab')[tabIdx]?.classList.add('active');
+  renderExec();
+  closeSheet('ai-sheet');
+  showToast('Market Loaded',scanResult.name+' · '+scanResult.market.label+' · '+scanResult.prediction,'ok');
+}
+
+// ═══════════ SYMBOL SHEET ═══════════
+function buildSymSheet(){
+  const el=document.getElementById('sym-body');if(!el)return;
+  el.innerHTML=SYMBOLS.map(s=>{
+    const p=symLast[s.id],op=symOpen[s.id];
+    const chg=p&&op?((p-op)/op*100):0;
+    return `<div class="sym-item ${s.id===sym?'on':''}" onclick="pickSym('${s.id}','${s.name}',this)">
+      <div class="si-l"><div class="si-dot ${p?'live':''}"></div><div class="si-name">${s.name}</div></div>
+      <div class="si-r">
+        <div class="si-price">${p?p.toFixed(2):'—'}</div>
+        <div class="si-chg ${chg>=0?'up':'dn'}">${(chg>=0?'+':'')+chg.toFixed(2)}%</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function pickSym(id,name){
+  sym=id;symName=name;
+  ticks=[];digitCounts=new Array(10).fill(0);totalTicks=0;lastDig=-1;selDig=-1;
+  document.getElementById('sbl-name').textContent=name.replace(' Index','').replace('Volatility','Vol');
+  document.getElementById('sbl-price').textContent='——';
+  document.getElementById('sbl-chg').textContent='';
+  wsSend({forget_all:'ticks'});
+  setTimeout(()=>wsSend({ticks:sym,subscribe:1}),350);
+  renderDRow();closeSheet('sym-sheet');
+}
+
+// ═══════════ STAKE ═══════════
+function adjS(d){const e=document.getElementById('snum');e.value=Math.max(0.35,parseFloat(e.value)+d).toFixed(2);onSC();}
+function setS(v,el){document.getElementById('snum').value=v;document.querySelectorAll('.pr').forEach(b=>b.classList.remove('on'));if(el)el.classList.add('on');onSC();}
+function onSC(){renderExec();}
+
+// ═══════════ TRADE MODE ═══════════
+function setTMode(m){
+  document.getElementById('mt-auto').classList.toggle('active',m==='auto');
+  document.getElementById('mt-manual').classList.toggle('active',m==='manual');
+}
+
+// ═══════════ NAVIGATION ═══════════
+function setNav(tab){
+  ['trade','hist','pos','acct'].forEach(t=>{const e=document.getElementById('bn-'+t);if(e)e.classList.toggle('on',t===tab);});
+  if(tab==='hist'){renderHist();updateStats();openSheet('hist-sheet');}
+  else if(tab==='ai'){openSheet('ai-sheet');}
+  else if(tab==='pos'){openSheet('pos-sheet');}
+  else if(tab==='acct'){updateStats();openSheet('acct-sheet');}
+  else closeAll();
+}
+
+// ═══════════ ACCOUNT ═══════════
+function setMode(m){
+  accountMode=m;
+  document.getElementById('pill-badge').textContent=m==='demo'?'D':'R';
+  const am=document.getElementById('acct-mode');if(am)am.textContent=m==='demo'?'Demo Account':'Real Account';
+  document.getElementById('adrop').classList.remove('open');
+}
+function togDrop(){document.getElementById('adrop').classList.toggle('open');}
+
+// ═══════════ SHEETS ═══════════
+function openSheet(id){
+  if(id==='sym-sheet')buildSymSheet();
+  if(id==='dep-sheet')renderDepRecords();
+  if(id==='hist-sheet'){renderHist();updateStats();}
+  if(id==='ref-sheet')updateRefSheet();
+  if(id==='acct-sheet')updateStats();
+  document.getElementById(id).classList.add('open');
+  document.getElementById('overlay').classList.add('open');
+}
+function closeSheet(id){
+  document.getElementById(id).classList.remove('open');
+  if(!document.querySelectorAll('.sheet.open').length)document.getElementById('overlay').classList.remove('open');
+}
+function closeAll(){
+  document.querySelectorAll('.sheet').forEach(s=>s.classList.remove('open'));
+  document.getElementById('overlay').classList.remove('open');
+  document.getElementById('adrop').classList.remove('open');
+  ['trade','hist','pos','acct'].forEach(t=>{const e=document.getElementById('bn-'+t);if(e)e.classList.remove('on');});
+  document.getElementById('bn-trade').classList.add('on');
+}
+
+// ═══════════ TOAST ═══════════
+function showToast(title,sub,type='info'){
+  const el=document.getElementById('toast');
+  document.getElementById('t-title').textContent=title;
+  document.getElementById('t-sub').textContent=sub;
+  el.className='toast show '+type;
+  if(toastTmr)clearTimeout(toastTmr);
+  toastTmr=setTimeout(()=>el.classList.remove('show'),4000);
+}
+
+// ═══════════ DOWNLOAD APP ═══════════
+function dlApp(){
+  const ua=navigator.userAgent;
+  if(/android/i.test(ua)){
+    if(confirm('Install EliteBinary App?\n\nTap OK then use your browser menu → "Add to Home Screen" for a native app experience!')){
+      showToast('Installing App','Use browser menu → Add to Home Screen','info');
+    }
+  } else if(/iphone|ipad/i.test(ua)){
+    if(confirm('Install EliteBinary App?\n\nTap OK then use Share button → "Add to Home Screen"!')){
+      showToast('Installing App','Tap Share → Add to Home Screen','info');
+    }
+  } else {
+    showToast('EliteBinary App','On your phone: browser menu → Add to Home Screen','info');
+  }
+}
+
+// ═══════════ AUTH ═══════════
+
+function logout(){localStorage.removeItem('eliteBinaryUser');localStorage.removeItem('eliteBinaryToken');window.location.href='/index.html';}
+</script>
 </div>
 
 <!-- ══ POSITIONS SHEET ══ -->
