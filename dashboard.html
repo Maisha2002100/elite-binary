@@ -493,6 +493,51 @@ button,input,select{font-family:inherit;outline:none;border:none;background:none
   border-radius:20px;font-size:.75rem;font-weight:600;color:var(--text2);cursor:pointer;transition:.15s;
 }
 .fpill.on{background:var(--blue-dim);border-color:rgba(27,110,245,.4);color:var(--blue)}
+  /* REFERRAL SHEET */
+.ref-link-box{background:var(--bg3);border:1px solid var(--border);border-radius:9px;padding:12px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.rlb-url{font-family:'JetBrains Mono',monospace;font-size:.72rem;color:var(--blue);flex:1;word-break:break-all}
+.rlb-copy{background:var(--blue);color:#fff;border-radius:6px;padding:5px 10px;font-size:.72rem;font-weight:700;cursor:pointer;flex-shrink:0}
+.ref-stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:13px}
+.rst{background:var(--bg3);border:1px solid var(--border);border-radius:9px;padding:11px}
+.rst-lbl{font-size:.6rem;color:var(--text3);text-transform:uppercase;font-weight:700;letter-spacing:.06em;margin-bottom:4px}
+.rst-val{font-family:'JetBrains Mono',monospace;font-size:1.15rem;font-weight:800;color:var(--text)}
+
+/* AI SCANNER SHEET — matches screenshot exactly */
+.scanner-wrap{padding:0}
+.scanner-header{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.scanner-ico{width:36px;height:36px;background:var(--blue-dim);border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:1.1rem}
+.scanner-title{font-size:1rem;font-weight:800;color:var(--text)}
+.scanner-desc{background:var(--bg3);border-radius:8px;padding:12px;margin-bottom:14px;font-size:.78rem;color:var(--text2);line-height:1.6}
+.scanner-desc strong{color:var(--text);font-weight:700}
+.scan-field{margin-bottom:12px}
+.scan-label{font-size:.7rem;font-weight:700;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em}
+.scan-select{width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;padding:11px 32px 11px 12px;color:var(--text);font-size:.86rem;appearance:none;font-family:'Lexend',sans-serif;cursor:pointer;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%237a8fb0' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center}
+.scan-progress-wrap{margin-bottom:12px}
+.scan-progress-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px}
+.scan-progress-label{font-size:.75rem;font-weight:600;color:var(--text2)}
+.scan-progress-count{font-size:.75rem;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--text)}
+.scan-bar{height:6px;background:var(--border);border-radius:3px;overflow:hidden}
+.scan-fill{height:100%;border-radius:3px;background:linear-gradient(90deg,var(--blue),var(--purple));transition:width .4s ease;width:0%}
+/* Scan result box */
+.scan-result{background:var(--green-dim);border:1px solid rgba(34,197,94,.3);border-radius:9px;padding:12px;margin-bottom:12px;display:none}
+.sr-top{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.sr-ico{font-size:1rem;color:var(--green)}
+.sr-text{font-size:.8rem;font-weight:700;color:var(--green)}
+.sr-quality{font-size:.75rem;color:var(--text2)}
+
+/* Scan result fields */
+.scan-result-fields{display:none}
+.srf{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px}
+.srf-label{font-size:.65rem;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px}
+.srf-val{font-size:.88rem;font-weight:700;color:var(--text)}
+
+.scan-btn{width:100%;padding:13px;background:var(--blue);color:#fff;border-radius:9px;font-size:.88rem;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;transition:.15s;margin-bottom:8px}
+.scan-btn:hover{background:var(--blue2)}
+.scan-btn:disabled{opacity:.5;cursor:not-allowed}
+.scan-btn.scanning{animation:pulse-btn 1.2s infinite}
+@keyframes pulse-btn{0%,100%{opacity:1}50%{opacity:.7}}
+.load-btn{width:100%;padding:12px;background:var(--blue-dim);border:1px solid rgba(27,110,245,.3);color:var(--blue);border-radius:9px;font-size:.85rem;font-weight:700;cursor:pointer;transition:.15s}
+.load-btn:hover{background:rgba(27,110,245,.25)}
 </style>
 </head>
 <body>
