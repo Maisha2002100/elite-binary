@@ -1137,6 +1137,7 @@ function startScan(){
     document.getElementById('scan-prog-lbl').textContent='Scanning '+SCAN_SYMS[Math.min(scanCurrent-1,SCAN_SYMS.length-1)]+'…';
     if(scanCurrent>=scanTotal){ clearInterval(scanIv); scanRunning=false; finishScan(mkt); }
   },420);
+  
 }
 function finishScan(mkt){
   const symNames={'1HZ10V':'Volatility 10 (1s)','1HZ25V':'Volatility 25 (1s)','1HZ50V':'Volatility 50 (1s)','1HZ75V':'Volatility 75 (1s)','1HZ100V':'Volatility 100 (1s)','R_10':'Volatility 10','R_25':'Volatility 25','R_50':'Volatility 50','R_75':'Volatility 75','R_100':'Volatility 100'};
