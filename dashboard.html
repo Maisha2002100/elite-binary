@@ -541,7 +541,7 @@ button,input,select{font-family:inherit;outline:none;border:none;background:none
     <button class="dep-m" onclick="selectDep(this,'bank','Bank Transfer')">Bank</button>
     <button class="dep-m" onclick="selectDep(this,'crypto','Crypto Deposit')">Crypto</button>
   </div>
-  <input class="dep-input" type="number" id="dep-amt" placeholder="Amount (USD)" min="10" oninput="updDepInfo()">
+  <input class="dep-input" type="number" id="dep-amt" placeholder="Amount (KES e.g. 500)" min="500" oninput="updDepInfo()">
   <input class="dep-input" type="text" id="dep-contact" placeholder="e.g. 0712345678">
   <div class="dep-summary">
     <div class="ds-col"><div class="ds-lbl">You Send</div><div class="ds-val" id="ds-send">$0.00</div></div>
@@ -553,7 +553,7 @@ button,input,select{font-family:inherit;outline:none;border:none;background:none
   <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border)">
     <div style="font-size:.82rem;font-weight:700;color:var(--text2);margin-bottom:10px">Withdraw</div>
     <div style="background:var(--green-dim);border:1px solid rgba(34,197,94,.25);border-radius:7px;padding:8px 10px;margin-bottom:9px;font-size:.72rem;color:var(--green)">⚡ Withdrawals processed after admin approval</div>
-    <input class="dep-input" type="number" id="wd-amt" placeholder="Amount (USD)" min="10">
+    <input class="dep-input" type="number" id="wd-amt" placeholder="Amount in USD (min $3.74)" min="3.74">
     <input class="dep-input" type="tel" id="wd-phone" placeholder="+254712345678">
     <button class="sheet-btn red-out" onclick="doWd()">Request Withdrawal</button>
     <div id="wd-msg" style="margin-top:8px;font-size:.78rem;font-weight:600;text-align:center;min-height:18px"></div>
@@ -739,7 +739,7 @@ const DEP_PH={mpesa:'e.g. 0712345678',card:'e.g. 4111 1111 1111 1111',bank:'e.g.
   if(!session){window.location.href='/index.html';return;}
   if(session.expiry&&Date.now()>session.expiry){localStorage.removeItem(DB_SESSION);window.location.href='/index.html';return;}
   const users=getDB();
-  const user=users.find(u=>u.id===session.userId&&u.password===session.pwHash);
+  const user=users.find(u=>u.id===session.userId)||(session.userId?{id:session.userId,name:'User',demo_balance:10000,real_balance:0,balance:0}:null);
   if(!user){localStorage.removeItem(DB_SESSION);window.location.href='/index.html';return;}
   currentUser=user; currentToken=session.token;
   // Load demo and real balances separately
@@ -1298,6 +1298,10 @@ function pickSym(id,name,el){
 // ══════════════════════════════════════════════
 // DEPOSIT / WITHDRAW
 // ══════════════════════════════════════════════
+const KES_RATE = 130; // 1 USD = 130 KES — update as needed
+const MIN_DEPOSIT_KES = 500;   // KES 500 ≈ $3.74
+const MIN_WITHDRAW_USD = 3.74;
+
 function selectDep(el,method,title){
   depMethod=method;
   document.querySelectorAll('.dep-m').forEach(b=>b.classList.remove('on'));el.classList.add('on');
@@ -1306,19 +1310,20 @@ function selectDep(el,method,title){
   document.getElementById('ds-method').textContent=DEP_METHODS[method];
 }
 function updDepInfo(){
-  const a=parseFloat(document.getElementById('dep-amt').value)||0;
-  document.getElementById('ds-send').textContent='$'+a.toFixed(2);
-  document.getElementById('ds-recv').textContent='$'+a.toFixed(2);
+  const kes=parseFloat(document.getElementById('dep-amt').value)||0;
+  const usd=kes/KES_RATE;
+  document.getElementById('ds-send').textContent='KES '+kes.toLocaleString();
+  document.getElementById('ds-recv').textContent='$'+usd.toFixed(2);
 }
 async function doDep(){
-  const amt=parseFloat(document.getElementById('dep-amt').value)||0;
+  const kesAmt=parseFloat(document.getElementById('dep-amt').value)||0;
+  const usdAmt=parseFloat((kesAmt/KES_RATE).toFixed(2));
   const contact=document.getElementById('dep-contact').value.trim();
   const msg=document.getElementById('dep-msg');
   const btn=document.querySelector('#dep-sheet .sheet-btn.blue');
-  const minDep=cfg.min_deposit||10;
 
   // Validation
-  if(amt<minDep){msg.style.color='var(--red)';msg.textContent='Minimum deposit is $'+minDep;return;}
+  if(kesAmt<MIN_DEPOSIT_KES){msg.style.color='var(--red)';msg.textContent='Minimum deposit is KES '+MIN_DEPOSIT_KES+' (≈ $'+((MIN_DEPOSIT_KES/KES_RATE).toFixed(2))+')';return;}
   if(!contact){msg.style.color='var(--red)';msg.textContent='Please enter your M-Pesa phone number';return;}
   if(depMethod!=='mpesa'){msg.style.color='var(--amber)';msg.textContent='Only M-Pesa is available right now';return;}
 
@@ -1338,7 +1343,8 @@ async function doDep(){
     const resp=await fetch('/api/deposits',{
       method:'POST',
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
-      body:JSON.stringify({method:'mpesa',phone:contact,amount:amt})
+      // Send KES amount to PayHero (M-Pesa expects KES); usdAmt credited to USD balance
+      body:JSON.stringify({method:'mpesa',phone:contact,amount:kesAmt,amountUsd:usdAmt})
     });
     const data=await resp.json();
     if(!resp.ok) throw new Error(data.error||'Deposit failed');
@@ -1346,7 +1352,7 @@ async function doDep(){
     // Record the pending deposit locally for the transaction list
     const dep={
       id:data.deposit?.id||('dep_'+Date.now()),
-      type:'deposit',amount:amt,method:'mpesa',contact,
+      type:'deposit',amountKes:kesAmt,amountUsd:usdAmt,method:'mpesa',contact,
       status:data.deposit?.status||'pending_stk',
       account:'real',
       date:new Date().toLocaleString(),
@@ -1359,11 +1365,11 @@ async function doDep(){
 
     if(data.deposit?.status==='completed'){
       // Mock mode: server credited immediately
-      realBalance=data.user?.balance??realBalance+amt;
+      realBalance=data.user?.balance??realBalance+usdAmt;
       if(accountMode==='real'){balance=realBalance;}
       updateBalDisp();
-      msg.style.color='var(--green)';msg.textContent='✓ $'+amt.toFixed(2)+' credited to Real account!';
-      showToast('Deposit Successful','$'+amt.toFixed(2)+' added to Real account','ok');
+      msg.style.color='var(--green)';msg.textContent='✓ KES '+kesAmt.toLocaleString()+' (≈ $'+usdAmt.toFixed(2)+') credited to Real account!';
+      showToast('Deposit Successful','$'+usdAmt.toFixed(2)+' added to Real account','ok');
       document.getElementById('dep-amt').value='';document.getElementById('dep-contact').value='';
     }else{
       // Real PayHero STK push sent — wait for M-Pesa callback
