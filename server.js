@@ -796,9 +796,9 @@ async function routeApi(req, res) {
 
       if (!db.config.mockPayments && deposit.method === 'mpesa') {
         const stk = PAYMENT_PROVIDER === 'mpesa'
-          ? await initiateStkPush({ amount, phone: deposit.phone, accountReference: deposit.id })
+          ? await initiateStkPush({ amount: amountKes, phone: deposit.phone, accountReference: deposit.id })
           : await initiatePayheroStkPush({
-              amount,
+              amount: amountKes,   // PayHero/M-Pesa expects KES, NOT USD
               phone: deposit.phone,
               accountReference: deposit.id,
               customerName: user.name || user.identifier
