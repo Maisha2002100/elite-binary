@@ -250,6 +250,30 @@ button,input,select{font-family:inherit;outline:none;border:none;background:none
 .empty-i{font-size:1.8rem;margin-bottom:8px}
 .menu-row{display:flex;align-items:center;gap:10px;padding:12px 8px;border-radius:8px;cursor:pointer;font-size:.86rem;font-weight:600;color:var(--text);transition:.15s;margin-bottom:1px}
 .menu-row:hover{background:var(--bg3)}
+/* ── SESSION RESULT POPUP (matches screenshots) ── */
+.result-popup{position:fixed;inset:0;background:rgba(10,14,23,.88);backdrop-filter:blur(10px);z-index:800;display:none;align-items:center;justify-content:center;padding:24px}
+.result-popup.open{display:flex}
+.result-card{background:#161f30;border:1px solid var(--border2);border-radius:18px;width:100%;max-width:360px;padding:32px 24px 24px;text-align:center;position:relative}
+.result-icon-wrap{width:60px;height:60px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:1.5rem;margin:0 auto 18px}
+.result-icon-wrap.win{background:rgba(34,197,94,.18);border:2px solid rgba(34,197,94,.4)}
+.result-icon-wrap.loss{background:rgba(239,68,68,.18);border:2px solid rgba(239,68,68,.4)}
+.result-icon-wrap.stop{background:rgba(245,158,11,.18);border:2px solid rgba(245,158,11,.4)}
+.result-title{font-size:1.2rem;font-weight:800;margin-bottom:6px}
+.result-title.win{color:var(--green)}.result-title.loss{color:var(--red)}.result-title.stop{color:var(--amber)}
+.result-amount{font-family:'JetBrains Mono',monospace;font-size:2rem;font-weight:900;margin-bottom:22px}
+.result-amount.win{color:var(--green)}.result-amount.loss{color:var(--red)}.result-amount.stop{color:var(--amber)}
+.result-stats{background:#0d1520;border-radius:10px;padding:14px 16px;margin-bottom:20px;text-align:left}
+.rs-row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid rgba(30,45,69,.6)}
+.rs-row:last-child{border-bottom:none}
+.rs-label{font-size:.8rem;color:var(--text2);font-weight:500}
+.rs-value{font-size:.85rem;font-weight:800;font-family:'JetBrains Mono',monospace;color:var(--text)}
+.rs-value.g{color:var(--green)}.rs-value.r{color:var(--red)}
+.result-close-btn{width:100%;padding:14px;border-radius:10px;font-size:.95rem;font-weight:800;cursor:pointer;border:none;transition:.15s}
+.result-close-btn.win{background:var(--green);color:#000}
+.result-close-btn.loss{background:var(--red);color:#fff}
+.result-close-btn.stop{background:var(--amber);color:#000}
+.result-close-btn:hover{opacity:.9;transform:translateY(-1px)}
+
 /* SETTINGS MODAL */
 .tsm-modal{position:fixed;inset:0;background:rgba(10,14,23,.85);backdrop-filter:blur(8px);z-index:600;display:none;align-items:flex-end;justify-content:center}
 .tsm-modal.open{display:flex}
@@ -291,8 +315,23 @@ button,input,select{font-family:inherit;outline:none;border:none;background:none
 
   <!-- ACC DROP -->
   <div class="acc-drop" id="acc-drop">
-    <div class="acc-opt active" onclick="setAccMode('demo')"><span class="acc-opt-nm">Demo Account</span><span class="acc-opt-bal" id="dd-demo">$0.00</span></div>
-    <div class="acc-opt" onclick="setAccMode('real')"><span class="acc-opt-nm">Real Account</span><span class="acc-opt-bal" id="dd-real">$0.00</span></div>
+    <div class="acc-opt active" id="acc-opt-demo" onclick="setAccMode('demo')">
+      <div style="display:flex;flex-direction:column;gap:1px">
+        <span class="acc-opt-nm">Demo Account</span>
+        <span style="font-size:.65rem;color:var(--text3)">Virtual balance</span>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
+        <span class="acc-opt-bal" id="dd-demo">$0.00</span>
+        <span style="font-size:.6rem;color:var(--blue);cursor:pointer;font-weight:700" onclick="event.stopPropagation();resetDemo()">↺ Reset</span>
+      </div>
+    </div>
+    <div class="acc-opt" id="acc-opt-real" onclick="setAccMode('real')">
+      <div style="display:flex;flex-direction:column;gap:1px">
+        <span class="acc-opt-nm">Real Account</span>
+        <span style="font-size:.65rem;color:var(--text3)">Live trades</span>
+      </div>
+      <span class="acc-opt-bal" id="dd-real">$0.00</span>
+    </div>
     <div class="acc-sep"></div>
     <div class="acc-logout" onclick="logout()">Sign Out</div>
   </div>
@@ -602,6 +641,23 @@ button,input,select{font-family:inherit;outline:none;border:none;background:none
   </div>
 </div>
 
+<!-- SESSION RESULT POPUP -->
+<div class="result-popup" id="result-popup">
+  <div class="result-card" id="result-card">
+    <div class="result-icon-wrap" id="result-icon-wrap">
+      <span id="result-icon">✓</span>
+    </div>
+    <div class="result-title" id="result-title">Target Profit Hit! 🎉</div>
+    <div class="result-amount" id="result-amount">+$0.00 USD</div>
+    <div class="result-stats">
+      <div class="rs-row"><span class="rs-label">Total Trades:</span><span class="rs-value" id="rp-trades">0</span></div>
+      <div class="rs-row"><span class="rs-label">Wins / Losses:</span><span class="rs-value"><span class="rs-value g" id="rp-wins">0W</span> / <span class="rs-value r" id="rp-losses">0L</span></span></div>
+      <div class="rs-row"><span class="rs-label">Win Rate:</span><span class="rs-value" id="rp-wr">0%</span></div>
+    </div>
+    <button class="result-close-btn" id="result-close-btn" onclick="closeResultPopup()">Close</button>
+  </div>
+</div>
+
 <div class="toast" id="toast"><div class="toast-t" id="toast-t"></div><div class="toast-s" id="toast-s"></div></div>
 
 <script>
@@ -620,6 +676,8 @@ function saveUserToDB(user){ const users=getDB(); const idx=users.findIndex(u=>u
 // ══════════════════════════════════════════════
 let currentUser=null, currentToken=null;
 let accountMode='demo', balance=0;
+let demoBalance=10000;   // tracks demo balance separately
+let realBalance=0;       // tracks real balance separately
 let cfg=getConfig();
 let ws=null;
 let sym='1HZ10V', symName='Vol 10 (1s)';
@@ -627,82 +685,21 @@ let symOpen={}, symLast={};
 let ticks=[], digitCounts=new Array(10).fill(0), totalTicks=0, lastDig=-1, selDig=-1;
 let contractType='DIGITEVEN';
 let cvs, cx, cW=0, cH=0, zoom=1;
-// ══════════════════════════════════════════════
-
-// ACCOUNT MODE MANAGEMENT - Balance Separation
-
-// ══════════════════════════════════════════════
-
-function setAccMode(mode){
-
-  accountMode = mode;
-
-  balance = mode === 'demo' ? demoBalance : realBalance;
-
-  updateBalDisp();
-
-  preventCrossBalanceAccess();
-
-}
-
-// Prevent demo account from seeing real balance
-
-function preventCrossBalanceAccess(){
-
-  if(accountMode === 'demo'){
-
-    document.getElementById('dd-real').textContent = 'Hidden';
-
-  } else {
-
-    document.getElementById('dd-real').textContent = `$ ${realBalance.toFixed(2)}`;
-
-  }
-
-}
-
-// Update balance display based on current mode
-
-function updateBalDisp(){
-
-  const displayBal = accountMode === 'demo' ? demoBalance : realBalance;
-
-  const el = document.getElementById('pill-bal');
-
-  if(el) el.textContent = `$ ${displayBal.toFixed(2)}`;
-
-  const badgeEl = document.getElementById('pill-badge');
-
-  if(badgeEl) badgeEl.textContent = accountMode === 'demo' ? 'D' : 'R';
-
-  
-
-  document.getElementById('dd-demo').textContent = `$ ${demoBalance.toFixed(2)}`;
-
-  preventCrossBalanceAccess();
-
-}
-
-function toggleAccDrop(){
-
-  const drop = document.getElementById('acc-drop');
-
-  if(drop) drop.classList.toggle('open');
-
-}
 
 // Single trade state
 let activeTrade=null, tradeEntry=0, tradeTick=0;
 
 // AUTO TRADE STATE
 let autoRunning=false;
-let autoDir=null;         // direction being run ('Even','Odd','Rise',etc)
-let autoTradeActive=false; // a single tick trade is in flight
-let autoSessionStart=0;   // balance at start of session
-let autoSessionPnl=0;     // running P&L for session
-let autoTradeCount=0;     // trades this session
-let autoCurrentStake=0;   // current stake (may multiply on loss)
-let autoBaseStake=0;      // original stake
+let autoDir=null;
+let autoTradeActive=false;
+let autoSessionStart=0;
+let autoSessionPnl=0;
+let autoTradeCount=0;
+let autoSessionWins=0;
+let autoSessionLosses=0;
+let autoCurrentStake=0;
+let autoBaseStake=0;
 let autoStopRequested=false;
 
 // Settings
@@ -745,7 +742,11 @@ const DEP_PH={mpesa:'e.g. 0712345678',card:'e.g. 4111 1111 1111 1111',bank:'e.g.
   const user=users.find(u=>u.id===session.userId&&u.password===session.pwHash);
   if(!user){localStorage.removeItem(DB_SESSION);window.location.href='/index.html';return;}
   currentUser=user; currentToken=session.token;
-  balance=user.balance||10000; cfg=getConfig();
+  // Load demo and real balances separately
+  demoBalance = user.demo_balance ?? user.balance ?? 10000;
+  realBalance = user.real_balance ?? 0;
+  balance = accountMode==='demo' ? demoBalance : realBalance;
+  cfg=getConfig();
   tradeHistory=JSON.parse(localStorage.getItem('eb_trades_'+user.id)||'[]');
   localStorage.setItem('eliteBinaryUser',JSON.stringify(user));
   localStorage.setItem('eliteBinaryToken',currentToken);
@@ -963,6 +964,8 @@ function startAutoTrade(dir){
   autoSessionStart=balance;
   autoSessionPnl=0;
   autoTradeCount=0;
+  autoSessionWins=0;
+  autoSessionLosses=0;
   autoStopRequested=false;
 
   // Show status bar
@@ -999,6 +1002,7 @@ function processAutoTick(price){
     const profit=won?autoCurrentStake*rate:-autoCurrentStake;
     autoTradeCount++;
     autoSessionPnl+=profit;
+    if(won) autoSessionWins++; else autoSessionLosses++;
 
     // Finalize this trade (record to history)
     finishTrade(won,profit,autoDir,contractType,autoCurrentStake,true);
@@ -1044,18 +1048,73 @@ function stopAutoTrade(reason){
   document.getElementById('entry-line').style.display='none';
   document.getElementById('entry-badge').style.display='none';
   document.getElementById('trade-progress').style.width='0%';
-  renderExecBtns(); // restore normal buttons
+  renderExecBtns();
 
-  const pnl=autoSessionPnl;
-  const msgs={
-    target:'🎯 Target profit hit! +$'+pnl.toFixed(2),
-    stoploss:'🛑 Stop loss hit. -$'+Math.abs(pnl).toFixed(2),
-    manual:'⏹ Stopped manually. P&L: '+(pnl>=0?'+':'')+' $'+pnl.toFixed(2),
-    balance:'⚠️ Insufficient balance to continue',
-  };
-  const types={target:'win',stoploss:'loss',manual:'stop',balance:'loss'};
-  showToast('Auto Trade Stopped', msgs[reason]||'Stopped', types[reason]||'info');
+  // Show result popup (matches screenshots exactly)
+  showResultPopup(reason);
   updateStats();
+}
+
+function showResultPopup(reason){
+  const pnl=autoSessionPnl;
+  const wins=autoSessionWins, losses=autoSessionLosses;
+  const total=autoTradeCount;
+  const wr=total>0?((wins/total)*100).toFixed(1):0;
+
+  const popup=document.getElementById('result-popup');
+  const card=document.getElementById('result-card');
+  const iconWrap=document.getElementById('result-icon-wrap');
+  const icon=document.getElementById('result-icon');
+  const title=document.getElementById('result-title');
+  const amount=document.getElementById('result-amount');
+  const closeBtn=document.getElementById('result-close-btn');
+
+  // Set content based on reason
+  if(reason==='target'){
+    iconWrap.className='result-icon-wrap win';
+    icon.textContent='✓';
+    title.className='result-title win';
+    title.textContent='Target Profit Hit! 🎉';
+    amount.className='result-amount win';
+    amount.textContent='+'+pnl.toFixed(2)+' USD';
+    closeBtn.className='result-close-btn win';
+  } else if(reason==='stoploss'){
+    iconWrap.className='result-icon-wrap loss';
+    icon.textContent='!';
+    title.className='result-title loss';
+    title.textContent='Target Loss Reached';
+    amount.className='result-amount loss';
+    amount.textContent=pnl.toFixed(2)+' USD';
+    closeBtn.className='result-close-btn loss';
+  } else if(reason==='manual'){
+    iconWrap.className='result-icon-wrap stop';
+    icon.textContent='⏹';
+    title.className='result-title stop';
+    title.textContent='Trading Stopped';
+    amount.className='result-amount stop';
+    amount.textContent=(pnl>=0?'+':'')+pnl.toFixed(2)+' USD';
+    closeBtn.className='result-close-btn stop';
+  } else {
+    iconWrap.className='result-icon-wrap loss';
+    icon.textContent='⚠';
+    title.className='result-title loss';
+    title.textContent='Insufficient Balance';
+    amount.className='result-amount loss';
+    amount.textContent=(pnl>=0?'+':'')+pnl.toFixed(2)+' USD';
+    closeBtn.className='result-close-btn loss';
+  }
+
+  // Stats
+  document.getElementById('rp-trades').textContent=total;
+  document.getElementById('rp-wins').textContent=wins+'W';
+  document.getElementById('rp-losses').textContent=losses+'L';
+  document.getElementById('rp-wr').textContent=wr+'%';
+
+  popup.classList.add('open');
+}
+
+function closeResultPopup(){
+  document.getElementById('result-popup').classList.remove('open');
 }
 
 function updateAutoStatus(){
@@ -1099,7 +1158,9 @@ function finishTrade(won,profit,dir,ct,stake,isAuto){
   const rate=cfg.payout_rate||0.952;
   const newBal=balance+stake+(won?stake*rate:0);
   balance=newBal;
-  if(currentUser){currentUser.balance=newBal;saveUserToDB(currentUser);}
+  // Save to correct account bucket
+  if(accountMode==='demo') demoBalance=newBal;
+  else realBalance=newBal;
   updateBalDisp();
 
   if(!isAuto){
@@ -1134,10 +1195,15 @@ function finishTrade(won,profit,dir,ct,stake,isAuto){
 // BALANCE DISPLAY
 // ══════════════════════════════════════════════
 function updateBalDisp(){
+  // Keep balances in sync per mode
+  if(accountMode==='demo') demoBalance=balance;
+  else realBalance=balance;
   const v='$ '+balance.toFixed(2);
   document.getElementById('pill-bal').textContent=v;
-  document.getElementById('dd-demo').textContent='$'+balance.toFixed(2);
+  const ddDemo=document.getElementById('dd-demo');if(ddDemo)ddDemo.textContent='$'+demoBalance.toFixed(2);
+  const ddReal=document.getElementById('dd-real');if(ddReal)ddReal.textContent='$'+realBalance.toFixed(2);
   const ab=document.getElementById('acct-bal');if(ab)ab.textContent='$'+balance.toFixed(2);
+  if(currentUser){currentUser.demo_balance=demoBalance;currentUser.real_balance=realBalance;currentUser.balance=balance;saveUserToDB(currentUser);}
 }
 function updateAcctInfo(){
   if(!currentUser)return;
@@ -1252,15 +1318,18 @@ function doDep(){
   if(amt<minDep){msg.style.color='var(--red)';msg.textContent='Minimum deposit is $'+minDep;return;}
   if(!contact){msg.style.color='var(--red)';msg.textContent='Please enter contact info';return;}
   msg.style.color='var(--text3)';msg.textContent='Processing…';
-  const dep={id:'dep_'+Date.now(),type:'deposit',amount:amt,method:depMethod,contact,status:'done',date:new Date().toLocaleString(),created_at:new Date().toISOString()};
+  const dep={id:'dep_'+Date.now(),type:'deposit',amount:amt,method:depMethod,contact,status:'done',account:accountMode,date:new Date().toLocaleString(),created_at:new Date().toISOString()};
   if(!currentUser.deposits)currentUser.deposits=[];
   currentUser.deposits.unshift(dep);
-  balance+=amt;currentUser.balance=balance;
+  // Credit the ACTIVE account only
+  balance+=amt;
+  if(accountMode==='demo') demoBalance=balance;
+  else realBalance=balance;
   processReferralBonus(amt);
   saveUserToDB(currentUser);
   updateBalDisp();renderTxnRecords();
-  msg.style.color='var(--green)';msg.textContent='✓ $'+amt.toFixed(2)+' credited!';
-  showToast('Deposit Received','$'+amt.toFixed(2)+' added','ok');
+  msg.style.color='var(--green)';msg.textContent='✓ $'+amt.toFixed(2)+' credited to '+(accountMode==='demo'?'Demo':'Real')+' account!';
+  showToast('Deposit Received','$'+amt.toFixed(2)+' added to '+(accountMode==='demo'?'Demo':'Real'),'ok');
   document.getElementById('dep-amt').value='';document.getElementById('dep-contact').value='';
 }
 function doWd(){
@@ -1271,9 +1340,11 @@ function doWd(){
   if(amt<minWd){msg.style.color='var(--red)';msg.textContent='Minimum withdrawal is $'+minWd;return;}
   if(!phone){msg.style.color='var(--red)';msg.textContent='Enter your phone number';return;}
   if(amt>balance){msg.style.color='var(--red)';msg.textContent='Insufficient balance';return;}
+  if(accountMode==='demo'){msg.style.color='var(--red)';msg.textContent='Cannot withdraw from demo account. Switch to Real account first.';return;}
   msg.style.color='var(--text3)';msg.textContent='Submitting…';
-  balance-=amt;currentUser.balance=balance;
-  const wd={id:'wd_'+Date.now(),type:'withdrawal',amount:amt,phone,status:'pending',date:new Date().toLocaleString(),created_at:new Date().toISOString()};
+  balance-=amt;
+  realBalance=balance;
+  const wd={id:'wd_'+Date.now(),type:'withdrawal',amount:amt,phone,status:'pending',account:'real',date:new Date().toLocaleString(),created_at:new Date().toISOString()};
   if(!currentUser.withdrawals)currentUser.withdrawals=[];
   currentUser.withdrawals.unshift(wd);
   if(cfg.auto_approve_withdrawals){wd.status='done';msg.style.color='var(--green)';msg.textContent='✓ $'+amt.toFixed(2)+' sent to '+phone;showToast('Withdrawal Sent','$'+amt.toFixed(2),'ok');}
@@ -1290,11 +1361,19 @@ function processReferralBonus(depositAmt){
   const users=getDB();
   const referrerIdx=users.findIndex(u=>u.id===ref.referrer_id);
   if(referrerIdx>=0){
-    users[referrerIdx].balance=(users[referrerIdx].balance||0)+bonus;
+    // Credit referrer's real_balance (they earn real money from referrals)
+    users[referrerIdx].real_balance=(users[referrerIdx].real_balance||0)+bonus;
+    users[referrerIdx].balance=(users[referrerIdx].real_balance||0); // keep in sync
     if(!users[referrerIdx].referrals)users[referrerIdx].referrals=[];
     users[referrerIdx].referrals.push({name:currentUser.name,email:currentUser.email,bonus,depositAmount:depositAmt,date:new Date().toLocaleString()});
     saveDB(users);
-    if(currentUser.id===users[referrerIdx].id){balance=users[referrerIdx].balance;currentUser=users[referrerIdx];}
+    // If the referrer is the current logged-in user, update live display
+    if(currentUser.id===users[referrerIdx].id){
+      realBalance=users[referrerIdx].real_balance;
+      currentUser=users[referrerIdx];
+      if(accountMode==='real'){ balance=realBalance; updateBalDisp(); }
+      else{ const ddReal=document.getElementById('dd-real');if(ddReal)ddReal.textContent='$'+realBalance.toFixed(2); }
+    }
   }
   const ri=refs.findIndex(r=>r.referred_id===currentUser.id&&!r.bonus_paid);
   if(ri>=0){refs[ri].bonus_paid=true;refs[ri].bonus_amount=bonus;refs[ri].deposit_amount=depositAmt;}
@@ -1430,18 +1509,43 @@ function updateRefSheet(){
   const code=currentUser.referral_code||'EB-XXXXX';
   const link=`${location.origin}/index.html?ref=${code}`;
   const urlEl=document.getElementById('ref-link-url');if(urlEl)urlEl.textContent=link;
+
+  // Load all referral records for this user
   const allRefs=JSON.parse(localStorage.getItem(DB_REFS)||'[]');
   const myRefs=allRefs.filter(r=>r.referrer_id===currentUser.id);
   const earned=myRefs.reduce((s,r)=>s+(r.bonus_amount||0),0);
+
   const set=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
-  set('ref-count',myRefs.length);set('ref-earned','$'+earned.toFixed(2));
+  set('ref-count',myRefs.length);
+  set('ref-earned','$'+earned.toFixed(2));
+
   const rl=document.getElementById('ref-list');if(!rl)return;
-  if(!myRefs.length){rl.innerHTML='<div class="empty-s"><div class="empty-i">👥</div>No referrals yet. Share your link!</div>';return;}
+  if(!myRefs.length){rl.innerHTML='<div class="empty-s"><div class="empty-i">👥</div>No referrals yet.<br><small style="font-size:.72rem;color:var(--text3)">Share your link to start earning 10%</small></div>';return;}
+
+  // Get referred user details from DB
   const users=getDB();
   rl.innerHTML=myRefs.map(r=>{
-    const ref=users.find(u=>u.id===r.referred_id);
-    const name=ref?.name||'Friend',email=ref?.email||'';
-    return `<div class="hcard"><div><div class="hc-type">👤 ${name}</div><div class="hc-meta">${email} · ${r.created_at?new Date(r.created_at).toLocaleDateString():''}</div></div><div><div class="hc-amt dep">+$${(r.bonus_amount||0).toFixed(2)}</div><div class="hc-stk">Deposit: $${(r.deposit_amount||0).toFixed(2)}</div></div></div>`;
+    const refUser=users.find(u=>u.id===r.referred_id);
+    const name=refUser?.name||'Friend';
+    const email=refUser?.email||'';
+    const joined=r.created_at?new Date(r.created_at).toLocaleDateString():'—';
+    const bonusPaid=r.bonus_paid;
+    return `<div class="hcard">
+      <div>
+        <div class="hc-type" style="display:flex;align-items:center;gap:6px">
+          <span style="width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,var(--blue),var(--purple));display:flex;align-items:center;justify-content:center;font-size:.7rem;font-weight:900;color:#fff;flex-shrink:0">${name.slice(0,2).toUpperCase()}</span>
+          ${name}
+        </div>
+        <div class="hc-meta">${email} · Joined ${joined}</div>
+      </div>
+      <div style="text-align:right">
+        <div class="hc-amt dep" style="color:${bonusPaid?'var(--green)':'var(--amber)'}">
+          ${bonusPaid?'+$'+(r.bonus_amount||0).toFixed(2):'Pending'}
+        </div>
+        <div class="hc-stk">Deposit: $${(r.deposit_amount||0).toFixed(2)}</div>
+        <div style="margin-top:3px"><span class="badge ${bonusPaid?'done':'pending'}">${bonusPaid?'✓ Bonus Paid':'⏳ Awaiting Deposit'}</span></div>
+      </div>
+    </div>`;
   }).join('');
 }
 function copyRef(){
@@ -1462,10 +1566,35 @@ function setNav(tab){
   else closeAllSheets();
 }
 function setAccMode(m){
+  if(autoRunning){ showToast('Warning','Stop auto trading before switching accounts','info'); document.getElementById('acc-drop').classList.remove('open'); return; }
   accountMode=m;
-  document.getElementById('pill-badge').textContent=m==='demo'?'D':'R';
-  document.getElementById('acct-mode-lbl').textContent=m==='demo'?'Demo Account':'Real Account';
+  // Switch balance to the correct account
+  balance = m==='demo' ? demoBalance : realBalance;
+
+  // Update badge
+  const badge=document.getElementById('pill-badge');
+  if(badge){ badge.textContent=m==='demo'?'D':'R'; badge.style.background=m==='demo'?'var(--blue)':'var(--green)'; }
+
+  // Update mode label
+  const ml=document.getElementById('acct-mode-lbl');if(ml)ml.textContent=m==='demo'?'Demo Account':'Real Account';
+
+  // Highlight active option in dropdown
+  document.getElementById('acc-opt-demo')?.classList.toggle('active',m==='demo');
+  document.getElementById('acc-opt-real')?.classList.toggle('active',m==='real');
+
+  updateBalDisp();
   document.getElementById('acc-drop').classList.remove('open');
+
+  showToast(m==='demo'?'Demo Account':'Real Account', m==='demo'?'Using virtual $'+demoBalance.toFixed(2):'Live balance: $'+realBalance.toFixed(2), 'info');
+}
+
+function resetDemo(){
+  if(!confirm('Reset demo balance to $10,000?')) return;
+  demoBalance=10000;
+  if(accountMode==='demo'){ balance=10000; updateBalDisp(); }
+  else{ const ddDemo=document.getElementById('dd-demo');if(ddDemo)ddDemo.textContent='$10,000.00'; if(currentUser){currentUser.demo_balance=10000;saveUserToDB(currentUser);} }
+  document.getElementById('acc-drop').classList.remove('open');
+  showToast('Demo Reset','Balance restored to $10,000.00','ok');
 }
 function toggleAccDrop(){document.getElementById('acc-drop').classList.toggle('open');}
 function openSheet(id){
