@@ -678,52 +678,42 @@ let currentUser=null, currentToken=null;
 let accountMode='demo', balance=0;
 let demoBalance=10000;   // tracks demo balance separately
 let realBalance=0;       // tracks real balance separately
-  <script>
-// Balance management logic improvement
-let accountMode = 'demo'; // Current mode: either 'demo' or 'real'
-let demoBalance = 10000;   // Virtual balance for demo accounts
-let realBalance = 0;       // Real balance for live accounts
-
-// Update account mode and display balances accordingly
-function updateAccountMode(mode) {
-    accountMode = mode;
-    if (mode === 'demo') {
-        displayBalance(demoBalance);
-    } else if (mode === 'real') {
-        displayBalance(realBalance);
-    }
+// ══════════════════════════════════════════════
+// ACCOUNT MODE MANAGEMENT - Balance Separation
+// ══════════════════════════════════════════════
+function setAccMode(mode){
+  accountMode = mode;
+  balance = mode === 'demo' ? demoBalance : realBalance;
+  updateBalDisp();
+  preventCrossBalanceAccess();
 }
 
-// Function to display the balance based on the current mode
-function displayBalance(balance) {
-    document.getElementById('pill-bal').textContent = `$ ${balance.toFixed(2)}`;
+// Prevent demo account from seeing real balance
+function preventCrossBalanceAccess(){
+  if(accountMode === 'demo'){
+    document.getElementById('dd-real').textContent = 'Hidden';
+  } else {
+    document.getElementById('dd-real').textContent = `$ ${realBalance.toFixed(2)}`;
+  }
 }
 
-// Function to prevent demo account from accessing real balance
-function preventCrossBalanceAccess() {
-    if (accountMode === 'demo') {
-        // Hide real account balance if in demo mode
-        document.getElementById('dd-real').textContent = 'Hidden';
-    } else {
-        // Show real account balance when in real mode
-        document.getElementById('dd-real').textContent = `$ ${realBalance.toFixed(2)}`;
-    }
+// Update balance display based on current mode
+function updateBalDisp(){
+  const displayBal = accountMode === 'demo' ? demoBalance : realBalance;
+  const el = document.getElementById('pill-bal');
+  if(el) el.textContent = `$ ${displayBal.toFixed(2)}`;
+  const badgeEl = document.getElementById('pill-badge');
+  if(badgeEl) badgeEl.textContent = accountMode === 'demo' ? 'D' : 'R';
+  
+  document.getElementById('dd-demo').textContent = `$ ${demoBalance.toFixed(2)}`;
+  preventCrossBalanceAccess();
 }
 
-// Example: On mode switch
-document.getElementById('acc-opt-demo').addEventListener('click', () => {
-    updateAccountMode('demo');
-    preventCrossBalanceAccess();
-});
-
-document.getElementById('acc-opt-real').addEventListener('click', () => {
-    updateAccountMode('real');
-    preventCrossBalanceAccess();
-});
-
-// Initial setup
-updateAccountMode(accountMode);
-preventCrossBalanceAccess();
+function toggleAccDrop(){
+  const drop = document.getElementById('acc-drop');
+  if(drop) drop.classList.toggle('open');
+}
+let cfg=getConfig();
 let cfg=getConfig();
 let ws=null;
 let sym='1HZ10V', symName='Vol 10 (1s)';
