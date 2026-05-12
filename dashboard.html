@@ -617,6 +617,17 @@ function saveUserToDB(user){ const users=getDB(); const idx=users.findIndex(u=>u
 
 // ══════════════════════════════════════════════
 // STATE
+// ══════════════════════════════════════════════
+let currentUser=null, currentToken=null;
+let accountMode='demo', balance=0;
+let cfg=getConfig();
+let ws=null;
+let sym='1HZ10V', symName='Vol 10 (1s)';
+let symOpen={}, symLast={};
+let ticks=[], digitCounts=new Array(10).fill(0), totalTicks=0, lastDig=-1, selDig=-1;
+let contractType='DIGITEVEN';
+let cvs, cx, cW=0, cH=0, zoom=1;
+// ══════════════════════════════════════════════
 
 // ACCOUNT MODE MANAGEMENT - Balance Separation
 
@@ -679,17 +690,6 @@ function toggleAccDrop(){
   if(drop) drop.classList.toggle('open');
 
 }
-
-let cfg=getConfig();
-let currentUser=null, currentToken=null;
-let accountMode='demo', balance=0;
-let cfg=getConfig();
-let ws=null;
-let sym='1HZ10V', symName='Vol 10 (1s)';
-let symOpen={}, symLast={};
-let ticks=[], digitCounts=new Array(10).fill(0), totalTicks=0, lastDig=-1, selDig=-1;
-let contractType='DIGITEVEN';
-let cvs, cx, cW=0, cH=0, zoom=1;
 
 // Single trade state
 let activeTrade=null, tradeEntry=0, tradeTick=0;
