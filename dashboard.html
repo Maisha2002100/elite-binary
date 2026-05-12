@@ -628,53 +628,67 @@ let ticks=[], digitCounts=new Array(10).fill(0), totalTicks=0, lastDig=-1, selDi
 let contractType='DIGITEVEN';
 let cvs, cx, cW=0, cH=0, zoom=1;
 // ══════════════════════════════════════════════
-// ACCOUNT MODE MANAGEMENT - Real vs Demo
+
+// ACCOUNT MODE MANAGEMENT - Balance Separation
+
 // ══════════════════════════════════════════════
 
-let accountMode = 'demo';
-let demoBalance = 10000;     // Starting demo balance
-let realBalance = 0;         // Starting real balance (can be loaded from user)
+function setAccMode(mode){
 
-function setAccMode(mode) {
-    accountMode = mode;
-    
-    // Update current working balance
-    balance = (mode === 'demo') ? demoBalance : realBalance;
-    
-    updateBalDisp();
-    preventCrossBalanceAccess();
-    
-    // Visual feedback
-    document.getElementById('pill-badge').textContent = mode === 'demo' ? 'D' : 'R';
-    document.getElementById('acct-mode-lbl').textContent = mode === 'demo' ? 'Demo Account' : 'Real Account';
+  accountMode = mode;
+
+  balance = mode === 'demo' ? demoBalance : realBalance;
+
+  updateBalDisp();
+
+  preventCrossBalanceAccess();
+
 }
 
-function preventCrossBalanceAccess() {
-    const ddReal = document.getElementById('dd-real');
-    const ddDemo = document.getElementById('dd-demo');
-    
-    if (accountMode === 'demo') {
-        ddDemo.textContent = `$ ${demoBalance.toFixed(2)}`;
-        ddReal.textContent = 'Hidden';
-    } else {
-        ddReal.textContent = `$ ${realBalance.toFixed(2)}`;
-        ddDemo.textContent = `$ ${demoBalance.toFixed(2)}`;
-    }
+// Prevent demo account from seeing real balance
+
+function preventCrossBalanceAccess(){
+
+  if(accountMode === 'demo'){
+
+    document.getElementById('dd-real').textContent = 'Hidden';
+
+  } else {
+
+    document.getElementById('dd-real').textContent = `$ ${realBalance.toFixed(2)}`;
+
+  }
+
 }
 
-function updateBalDisp() {
-    const currentBal = accountMode === 'demo' ? demoBalance : realBalance;
-    const pillBal = document.getElementById('pill-bal');
-    if (pillBal) pillBal.textContent = `$ ${currentBal.toFixed(2)}`;
+// Update balance display based on current mode
 
-    const acctBal = document.getElementById('acct-bal');
-    if (acctBal) acctBal.textContent = `$ ${currentBal.toFixed(2)}`;
+function updateBalDisp(){
+
+  const displayBal = accountMode === 'demo' ? demoBalance : realBalance;
+
+  const el = document.getElementById('pill-bal');
+
+  if(el) el.textContent = `$ ${displayBal.toFixed(2)}`;
+
+  const badgeEl = document.getElementById('pill-badge');
+
+  if(badgeEl) badgeEl.textContent = accountMode === 'demo' ? 'D' : 'R';
+
+  
+
+  document.getElementById('dd-demo').textContent = `$ ${demoBalance.toFixed(2)}`;
+
+  preventCrossBalanceAccess();
+
 }
 
-// Toggle account dropdown
-function toggleAccDrop() {
-    const drop = document.getElementById('acc-drop');
-    if (drop) drop.classList.toggle('open');
+function toggleAccDrop(){
+
+  const drop = document.getElementById('acc-drop');
+
+  if(drop) drop.classList.toggle('open');
+
 }
 
 // Single trade state
@@ -730,15 +744,11 @@ const DEP_PH={mpesa:'e.g. 0712345678',card:'e.g. 4111 1111 1111 1111',bank:'e.g.
   const users=getDB();
   const user=users.find(u=>u.id===session.userId&&u.password===session.pwHash);
   if(!user){localStorage.removeItem(DB_SESSION);window.location.href='/index.html';return;}
-currentUser = user;
-currentToken = session.token;
-
-// Load saved balances
-demoBalance = user.demoBalance !== undefined ? user.demoBalance : 10000;
-realBalance = user.realBalance !== undefined ? user.realBalance : 0;
-balance = accountMode === 'demo' ? demoBalance : realBalance;
-tradeHistory = JSON.parse(localStorage.getItem('eb_trades_' + user.id) || '[]');
-localStorage.setItem('eliteBinaryUser', JSON.stringify(user));
+  currentUser=user; currentToken=session.token;
+  balance=user.balance||10000; cfg=getConfig();
+  tradeHistory=JSON.parse(localStorage.getItem('eb_trades_'+user.id)||'[]');
+  localStorage.setItem('eliteBinaryUser',JSON.stringify(user));
+  localStorage.setItem('eliteBinaryToken',currentToken);
   initCanvas(); renderDigitRow(); renderExecBtns();
   connectWS(); updateBalDisp(); updateAcctInfo(); updateStats();
   setInterval(()=>{cfg=getConfig();renderExecBtns();},5000);
@@ -1252,13 +1262,6 @@ function doDep(){
   msg.style.color='var(--green)';msg.textContent='✓ $'+amt.toFixed(2)+' credited!';
   showToast('Deposit Received','$'+amt.toFixed(2)+' added','ok');
   document.getElementById('dep-amt').value='';document.getElementById('dep-contact').value='';
-if (accountMode === 'demo') {
-    demoBalance += amt;
-    if (currentUser) currentUser.demoBalance = demoBalance;
-} else {
-    realBalance += amt;
-    if (currentUser) currentUser.realBalance = realBalance;
-}
 }
 function doWd(){
   const amt=parseFloat(document.getElementById('wd-amt').value)||0;
