@@ -678,6 +678,52 @@ let currentUser=null, currentToken=null;
 let accountMode='demo', balance=0;
 let demoBalance=10000;   // tracks demo balance separately
 let realBalance=0;       // tracks real balance separately
+  <script>
+// Balance management logic improvement
+let accountMode = 'demo'; // Current mode: either 'demo' or 'real'
+let demoBalance = 10000;   // Virtual balance for demo accounts
+let realBalance = 0;       // Real balance for live accounts
+
+// Update account mode and display balances accordingly
+function updateAccountMode(mode) {
+    accountMode = mode;
+    if (mode === 'demo') {
+        displayBalance(demoBalance);
+    } else if (mode === 'real') {
+        displayBalance(realBalance);
+    }
+}
+
+// Function to display the balance based on the current mode
+function displayBalance(balance) {
+    document.getElementById('pill-bal').textContent = `$ ${balance.toFixed(2)}`;
+}
+
+// Function to prevent demo account from accessing real balance
+function preventCrossBalanceAccess() {
+    if (accountMode === 'demo') {
+        // Hide real account balance if in demo mode
+        document.getElementById('dd-real').textContent = 'Hidden';
+    } else {
+        // Show real account balance when in real mode
+        document.getElementById('dd-real').textContent = `$ ${realBalance.toFixed(2)}`;
+    }
+}
+
+// Example: On mode switch
+document.getElementById('acc-opt-demo').addEventListener('click', () => {
+    updateAccountMode('demo');
+    preventCrossBalanceAccess();
+});
+
+document.getElementById('acc-opt-real').addEventListener('click', () => {
+    updateAccountMode('real');
+    preventCrossBalanceAccess();
+});
+
+// Initial setup
+updateAccountMode(accountMode);
+preventCrossBalanceAccess();
 let cfg=getConfig();
 let ws=null;
 let sym='1HZ10V', symName='Vol 10 (1s)';
