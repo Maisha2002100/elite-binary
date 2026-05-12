@@ -769,8 +769,13 @@ async function routeApi(req, res) {
       if (!user && body.userId) user = findUser(db, body.userId);
       if (!user) return send(res, 401, { error: 'Authentication required' });
 
-      const amount = money(body.amount);
-      if (amount <= 0) return send(res, 400, { error: 'Deposit amount must be greater than zero' });
+      const amountKes = money(body.amount);   // raw KES amount sent to M-Pesa
+      const KES_RATE = 130;
+      // If frontend sends amountUsd explicitly use it, else convert from KES
+      const amount = body.amountUsd ? money(Number(body.amountUsd)) : money(amountKes / KES_RATE);
+      if (amountKes <= 0) return send(res, 400, { error: 'Deposit amount must be greater than zero' });
+      const MIN_KES = 500;
+      if (amountKes < MIN_KES) return send(res, 400, { error: `Minimum deposit is KES ${MIN_KES}` });
       if (String(body.method || 'mpesa') === 'mpesa' && !String(body.phone || '').trim()) {
         return send(res, 400, { error: 'M-Pesa phone number is required' });
       }
@@ -780,7 +785,8 @@ async function routeApi(req, res) {
         userId: user.id,
         method: String(body.method || 'mpesa'),
         phone: String(body.phone || '').trim(),
-        amount,
+        amountKes,   // what M-Pesa actually charges
+        amount,      // USD equivalent credited to balance
         status: db.config.mockPayments ? 'completed' : 'pending_stk',
         providerReference: null,
         paymentProvider: db.config.mockPayments ? 'mock' : PAYMENT_PROVIDER,
