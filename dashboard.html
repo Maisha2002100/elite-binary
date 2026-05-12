@@ -1310,47 +1310,174 @@ function updDepInfo(){
   document.getElementById('ds-send').textContent='$'+a.toFixed(2);
   document.getElementById('ds-recv').textContent='$'+a.toFixed(2);
 }
-function doDep(){
+async function doDep(){
   const amt=parseFloat(document.getElementById('dep-amt').value)||0;
   const contact=document.getElementById('dep-contact').value.trim();
   const msg=document.getElementById('dep-msg');
+  const btn=document.querySelector('#dep-sheet .sheet-btn.blue');
   const minDep=cfg.min_deposit||10;
+
+  // Validation
   if(amt<minDep){msg.style.color='var(--red)';msg.textContent='Minimum deposit is $'+minDep;return;}
-  if(!contact){msg.style.color='var(--red)';msg.textContent='Please enter contact info';return;}
-  msg.style.color='var(--text3)';msg.textContent='Processing…';
-  const dep={id:'dep_'+Date.now(),type:'deposit',amount:amt,method:depMethod,contact,status:'done',account:accountMode,date:new Date().toLocaleString(),created_at:new Date().toISOString()};
-  if(!currentUser.deposits)currentUser.deposits=[];
-  currentUser.deposits.unshift(dep);
-  // Credit the ACTIVE account only
-  balance+=amt;
-  if(accountMode==='demo') demoBalance=balance;
-  else realBalance=balance;
-  processReferralBonus(amt);
-  saveUserToDB(currentUser);
-  updateBalDisp();renderTxnRecords();
-  msg.style.color='var(--green)';msg.textContent='✓ $'+amt.toFixed(2)+' credited to '+(accountMode==='demo'?'Demo':'Real')+' account!';
-  showToast('Deposit Received','$'+amt.toFixed(2)+' added to '+(accountMode==='demo'?'Demo':'Real'),'ok');
-  document.getElementById('dep-amt').value='';document.getElementById('dep-contact').value='';
+  if(!contact){msg.style.color='var(--red)';msg.textContent='Please enter your M-Pesa phone number';return;}
+  if(depMethod!=='mpesa'){msg.style.color='var(--amber)';msg.textContent='Only M-Pesa is available right now';return;}
+
+  // Real account only — block demo deposits via PayHero
+  if(accountMode==='demo'){
+    msg.style.color='var(--amber)';
+    msg.textContent='Switch to Real account to make a real deposit';
+    return;
+  }
+
+  // Loading state
+  msg.style.color='var(--text3)';msg.textContent='Sending STK push to '+contact+'…';
+  if(btn){btn.disabled=true;btn.textContent='Please wait…';}
+
+  try{
+    const token=currentToken||localStorage.getItem('eliteBinaryToken')||'';
+    const resp=await fetch('/api/deposits',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+      body:JSON.stringify({method:'mpesa',phone:contact,amount:amt})
+    });
+    const data=await resp.json();
+    if(!resp.ok) throw new Error(data.error||'Deposit failed');
+
+    // Record the pending deposit locally for the transaction list
+    const dep={
+      id:data.deposit?.id||('dep_'+Date.now()),
+      type:'deposit',amount:amt,method:'mpesa',contact,
+      status:data.deposit?.status||'pending_stk',
+      account:'real',
+      date:new Date().toLocaleString(),
+      created_at:new Date().toISOString()
+    };
+    if(!currentUser.deposits)currentUser.deposits=[];
+    currentUser.deposits.unshift(dep);
+    saveUserToDB(currentUser);
+    renderTxnRecords();
+
+    if(data.deposit?.status==='completed'){
+      // Mock mode: server credited immediately
+      realBalance=data.user?.balance??realBalance+amt;
+      if(accountMode==='real'){balance=realBalance;}
+      updateBalDisp();
+      msg.style.color='var(--green)';msg.textContent='✓ $'+amt.toFixed(2)+' credited to Real account!';
+      showToast('Deposit Successful','$'+amt.toFixed(2)+' added to Real account','ok');
+      document.getElementById('dep-amt').value='';document.getElementById('dep-contact').value='';
+    }else{
+      // Real PayHero STK push sent — wait for M-Pesa callback
+      msg.style.color='var(--amber)';
+      msg.textContent='📲 Check your phone and enter your M-Pesa PIN to complete payment';
+      showToast('STK Sent','Enter your M-Pesa PIN on '+contact,'info');
+      document.getElementById('dep-amt').value='';document.getElementById('dep-contact').value='';
+      // Poll server every 5 s for up to 60 s to reflect balance after callback
+      pollRealBalance(data.deposit?.id, 12, 5000);
+    }
+  }catch(e){
+    msg.style.color='var(--red)';msg.textContent=e.message||'Network error — please try again';
+    showToast('Deposit Failed',e.message||'Network error','loss');
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent='Deposit Now';}
+  }
 }
-function doWd(){
+
+// Poll /api/wallet until the deposit is reflected (max attempts × interval ms)
+function pollRealBalance(depositId,attemptsLeft,interval){
+  if(attemptsLeft<=0)return;
+  const token=currentToken||localStorage.getItem('eliteBinaryToken')||'';
+  setTimeout(async()=>{
+    try{
+      const resp=await fetch('/api/wallet',{headers:{'Authorization':'Bearer '+token}});
+      if(!resp.ok)return pollRealBalance(depositId,attemptsLeft-1,interval);
+      const data=await resp.json();
+      const serverBal=data.user?.balance;
+      if(typeof serverBal==='number'&&serverBal>realBalance){
+        realBalance=serverBal;
+        if(accountMode==='real'){balance=realBalance;}
+        updateBalDisp();
+        // Update local deposit status to completed
+        if(currentUser.deposits){
+          const d=currentUser.deposits.find(x=>x.id===depositId);
+          if(d)d.status='done';
+          saveUserToDB(currentUser);renderTxnRecords();
+        }
+        const msg=document.getElementById('dep-msg');
+        if(msg){msg.style.color='var(--green)';msg.textContent='✓ Payment confirmed! Real balance updated.';}
+        showToast('Payment Confirmed','Real balance updated','ok');
+        return; // done
+      }
+    }catch(_){}
+    pollRealBalance(depositId,attemptsLeft-1,interval);
+  },interval);
+}
+async function doWd(){
   const amt=parseFloat(document.getElementById('wd-amt').value)||0;
   const phone=document.getElementById('wd-phone').value.trim();
   const msg=document.getElementById('wd-msg');
+  const btn=document.querySelector('#dep-sheet .sheet-btn.red-out');
   const minWd=cfg.min_withdrawal||10;
+
+  // Validation
   if(amt<minWd){msg.style.color='var(--red)';msg.textContent='Minimum withdrawal is $'+minWd;return;}
-  if(!phone){msg.style.color='var(--red)';msg.textContent='Enter your phone number';return;}
-  if(amt>balance){msg.style.color='var(--red)';msg.textContent='Insufficient balance';return;}
+  if(!phone){msg.style.color='var(--red)';msg.textContent='Enter your M-Pesa phone number';return;}
   if(accountMode==='demo'){msg.style.color='var(--red)';msg.textContent='Cannot withdraw from demo account. Switch to Real account first.';return;}
-  msg.style.color='var(--text3)';msg.textContent='Submitting…';
-  balance-=amt;
-  realBalance=balance;
-  const wd={id:'wd_'+Date.now(),type:'withdrawal',amount:amt,phone,status:'pending',account:'real',date:new Date().toLocaleString(),created_at:new Date().toISOString()};
-  if(!currentUser.withdrawals)currentUser.withdrawals=[];
-  currentUser.withdrawals.unshift(wd);
-  if(cfg.auto_approve_withdrawals){wd.status='done';msg.style.color='var(--green)';msg.textContent='✓ $'+amt.toFixed(2)+' sent to '+phone;showToast('Withdrawal Sent','$'+amt.toFixed(2),'ok');}
-  else{msg.style.color='var(--amber)';msg.textContent='⏳ Submitted — pending admin approval';showToast('Submitted','Pending admin approval','info');}
-  saveUserToDB(currentUser);updateBalDisp();renderTxnRecords();
-  document.getElementById('wd-amt').value='';document.getElementById('wd-phone').value='';
+  if(amt>realBalance){msg.style.color='var(--red)';msg.textContent='Insufficient real account balance';return;}
+
+  // Loading state
+  msg.style.color='var(--text3)';msg.textContent='Submitting withdrawal request…';
+  if(btn){btn.disabled=true;btn.textContent='Please wait…';}
+
+  try{
+    const token=currentToken||localStorage.getItem('eliteBinaryToken')||'';
+    const resp=await fetch('/api/withdrawals',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+      body:JSON.stringify({method:'mpesa',destination:phone,amount:amt})
+    });
+    const data=await resp.json();
+    if(!resp.ok) throw new Error(data.error||'Withdrawal failed');
+
+    // Reflect the deducted balance from server response
+    const serverBal=data.user?.balance;
+    if(typeof serverBal==='number'){
+      realBalance=serverBal;
+      if(accountMode==='real') balance=realBalance;
+      updateBalDisp();
+    }
+
+    // Record locally for transaction history
+    const wd={
+      id:data.withdrawal?.id||('wd_'+Date.now()),
+      type:'withdrawal',amount:amt,phone,
+      status:data.withdrawal?.status||'processing',
+      account:'real',
+      date:new Date().toLocaleString(),
+      created_at:new Date().toISOString()
+    };
+    if(!currentUser.withdrawals)currentUser.withdrawals=[];
+    currentUser.withdrawals.unshift(wd);
+    saveUserToDB(currentUser);renderTxnRecords();
+
+    const isPaid=data.withdrawal?.status==='paid';
+    if(isPaid){
+      // Mock mode: paid instantly
+      msg.style.color='var(--green)';msg.textContent='✓ $'+amt.toFixed(2)+' sent to '+phone;
+      showToast('Withdrawal Sent','$'+amt.toFixed(2)+' to '+phone,'ok');
+    }else{
+      // Real mode: queued for B2C or pending admin approval
+      msg.style.color='var(--amber)';msg.textContent='⏳ Submitted — funds will arrive shortly on '+phone;
+      showToast('Withdrawal Submitted','Processing to '+phone,'info');
+    }
+
+    document.getElementById('wd-amt').value='';document.getElementById('wd-phone').value='';
+
+  }catch(e){
+    msg.style.color='var(--red)';msg.textContent=e.message||'Network error — please try again';
+    showToast('Withdrawal Failed',e.message||'Network error','loss');
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent='Request Withdrawal';}
+  }
 }
 function processReferralBonus(depositAmt){
   if(!currentUser.referred_by)return;
