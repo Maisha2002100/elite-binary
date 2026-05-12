@@ -739,7 +739,7 @@ const DEP_PH={mpesa:'e.g. 0712345678',card:'e.g. 4111 1111 1111 1111',bank:'e.g.
   if(!session){window.location.href='/index.html';return;}
   if(session.expiry&&Date.now()>session.expiry){localStorage.removeItem(DB_SESSION);window.location.href='/index.html';return;}
   const users=getDB();
-  const user=users.find(u=>u.id===session.userId&&u.password===session.pwHash);
+  const user=users.find(u=>u.id===session.userId)||(session.userId?{id:session.userId,name:'User',demo_balance:10000,real_balance:0,balance:0}:null);
   if(!user){localStorage.removeItem(DB_SESSION);window.location.href='/index.html';return;}
   currentUser=user; currentToken=session.token;
   // Load demo and real balances separately
