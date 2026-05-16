@@ -7,7 +7,7 @@ const crypto = require('crypto');
 try { require('dotenv').config(); } catch (_) { /* optional */ }
 
 const PORT = Number(process.env.PORT || 3000);
-const ADMIN_KEY = process.env.ADMIN_KEY || '@eliteBinary';
+const ADMIN_KEY = process.env.ADMIN_KEY || 'change-this-admin-key';
 const JWT_SECRET = process.env.JWT_SECRET || 'change-this-jwt-secret-please';
 const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const OTP_TTL_MS = 10 * 60 * 1000; // 10 minutes
@@ -294,10 +294,7 @@ function publicUser(user) {
 // ── Trade settlement ────────────────────────────────────────────────────
 function settleContract(contractType, params = {}, config = {}) {
   const type = String(contractType || '').toUpperCase();
-  // Per-user override takes priority over global config
-  const userOverride = config.userWinOverride !== undefined ? Number(config.userWinOverride) : undefined;
-  const rawProb = userOverride !== undefined ? userOverride : Number(config.winProbability);
-  const configuredProbability = rawProb;
+  const configuredProbability = Number(config.winProbability);
   const probability = Number.isFinite(configuredProbability)
     ? Math.min(0.99, Math.max(0.01, configuredProbability))
     : null;
@@ -553,12 +550,56 @@ function parseBody(req) {
   });
 }
 
-function requireAdmin(req, res) {
-  if (req.headers['x-admin-key'] !== ADMIN_KEY) {
-    send(res, 401, { error: 'Invalid admin key' });
-    return false;
+// ── Seed the built-in admin account (never exposed publicly) ────────────
+const SEED_ADMIN_EMAIL = 'admin@elitebinary.com';
+const SEED_ADMIN_PASSWORD = '@elitebinary2002';
+const SEED_ADMIN_NAME = 'Platform Admin';
+
+async function ensureAdminAccount(db) {
+  const existing = findUserByIdentifier(db, SEED_ADMIN_EMAIL);
+  if (!existing) {
+    const admin = {
+      id: id('usr'),
+      identifier: SEED_ADMIN_EMAIL,
+      name: SEED_ADMIN_NAME,
+      passwordHash: hashPassword(SEED_ADMIN_PASSWORD),
+      balance: 0,
+      demo: false,
+      verified: true,
+      suspended: false,
+      role: 'admin',
+      createdAt: now()
+    };
+    db.users.push(admin);
+    await writeDb(db);
+    console.log('[ADMIN] Seed admin account created');
+  } else if (existing.role !== 'admin') {
+    // Ensure role is correct if account existed before role field was added
+    existing.role = 'admin';
+    await writeDb(db);
+    console.log('[ADMIN] Seed admin account role corrected');
   }
-  return true;
+}
+
+// ── Admin guard: accepts X-Admin-Key header OR JWT with role=admin ───────
+function requireAdmin(req, res, db) {
+  // Legacy key-based access (server-to-server / direct API use)
+  if (req.headers['x-admin-key'] && req.headers['x-admin-key'] === ADMIN_KEY) {
+    return true;
+  }
+  // Role-based JWT access (dashboard admin panel)
+  if (db) {
+    const user = authenticate(req, db);
+    if (user && user.role === 'admin') return true;
+  }
+  send(res, 401, { error: 'Admin access required' });
+  return false;
+}
+
+// New endpoint: verify the current JWT is an admin role (for frontend checks)
+function isAdminToken(req, db) {
+  const user = authenticate(req, db);
+  return user && user.role === 'admin';
 }
 
 function requireUser(req, res, db) {
@@ -610,7 +651,7 @@ async function routeApi(req, res) {
         demo,
         verified: false,
         suspended: false,
-        role: 'user',
+        role: 'user',  // always 'user' — admin accounts are seeded only at startup
         createdAt: now()
       };
       db.users.push(user);
@@ -909,10 +950,7 @@ async function routeApi(req, res) {
         reference: body.contractType || 'trade'
       });
 
-      const tradeConfig = { ...db.config };
-      if (user.winProbabilityOverride !== undefined) tradeConfig.winProbability = user.winProbabilityOverride;
-      if (user.tradingDisabled) return send(res, 403, { error: 'Trading has been disabled for your account' });
-      const settlement = settleContract(body.contractType, body.params, tradeConfig);
+      const settlement = settleContract(body.contractType, body.params, db.config);
       const won = settlement.won;
       const profit = won ? money(stake * Number(db.config.payoutRate)) : -stake;
       if (won) {
@@ -1018,9 +1056,37 @@ async function routeApi(req, res) {
       return send(res, 200, { ok: true });
     }
 
+    // ── Admin: role check (used by frontend to detect admin session) ──
+    if (req.method === 'GET' && url.pathname === '/api/admin/me') {
+      const isAdmin = isAdminToken(req, db);
+      if (!isAdmin) return send(res, 403, { admin: false });
+      const user = authenticate(req, db);
+      return send(res, 200, { admin: true, user: publicUser(user) });
+    }
+
+    // ── Admin: manage user balance ────────────────────────────────────
+    if (req.method === 'POST' && url.pathname === '/api/admin/users/credit') {
+      if (!requireAdmin(req, res, db)) return;
+      const body = await parseBody(req);
+      const target = findUser(db, body.userId);
+      if (!target) return send(res, 404, { error: 'User not found' });
+      const amount = money(body.amount);
+      if (!Number.isFinite(amount)) return send(res, 400, { error: 'Invalid amount' });
+      target.balance = money(target.balance + amount);
+      ledger(db, {
+        userId: target.id,
+        type: 'admin_credit',
+        amount,
+        balanceAfter: target.balance,
+        reference: `admin_${now()}`
+      });
+      await writeDb(db);
+      return send(res, 200, { user: publicUser(target) });
+    }
+
     // ── Admin ─────────────────────────────────────────────────────────
     if (req.method === 'GET' && url.pathname === '/api/admin/summary') {
-      if (!requireAdmin(req, res)) return;
+      if (!requireAdmin(req, res, db)) return;
       return send(res, 200, {
         config: db.config,
         users: db.users.map(publicUser),
@@ -1032,7 +1098,7 @@ async function routeApi(req, res) {
     }
 
     if (req.method === 'POST' && url.pathname === '/api/admin/config') {
-      if (!requireAdmin(req, res)) return;
+      if (!requireAdmin(req, res, db)) return;
       const body = await parseBody(req);
       if (body.payoutRate !== undefined) {
         db.config.payoutRate = Math.min(10, Math.max(0.01, Number(body.payoutRate)));
@@ -1054,7 +1120,7 @@ async function routeApi(req, res) {
     }
 
     if (req.method === 'POST' && url.pathname === '/api/admin/users/suspend') {
-      if (!requireAdmin(req, res)) return;
+      if (!requireAdmin(req, res, db)) return;
       const body = await parseBody(req);
       const user = findUser(db, body.userId);
       if (!user) return send(res, 404, { error: 'User not found' });
@@ -1064,7 +1130,7 @@ async function routeApi(req, res) {
     }
 
     if (req.method === 'POST' && url.pathname === '/api/admin/withdrawals/approve') {
-      if (!requireAdmin(req, res)) return;
+      if (!requireAdmin(req, res, db)) return;
       const body = await parseBody(req);
       const wd = db.withdrawals.find((w) => w.id === body.withdrawalId);
       if (!wd) return send(res, 404, { error: 'Withdrawal not found' });
@@ -1090,7 +1156,7 @@ async function routeApi(req, res) {
     }
 
     if (req.method === 'POST' && url.pathname === '/api/admin/deposits/approve') {
-      if (!requireAdmin(req, res)) return;
+      if (!requireAdmin(req, res, db)) return;
       const body = await parseBody(req);
       const dep = db.deposits.find((d) => d.id === body.depositId);
       if (!dep) return send(res, 404, { error: 'Deposit not found' });
@@ -1110,127 +1176,6 @@ async function routeApi(req, res) {
       }
       await writeDb(db);
       return send(res, 200, { deposit: dep });
-    }
-
-
-    // ── Admin: credit/debit user balance ──────────────────────────────────
-    if (req.method === 'POST' && url.pathname === '/api/admin/users/credit') {
-      if (!requireAdmin(req, res)) return;
-      const body = await parseBody(req);
-      const user = findUser(db, body.userId);
-      if (!user) return send(res, 404, { error: 'User not found' });
-      const amount = money(Number(body.amount));
-      if (!amount || !Number.isFinite(amount)) return send(res, 400, { error: 'Invalid amount' });
-      user.balance = money(user.balance + amount);
-      ledger(db, {
-        userId: user.id,
-        type: amount > 0 ? 'admin_credit' : 'admin_debit',
-        amount,
-        balanceAfter: user.balance,
-        reference: id('adm')
-      });
-      await writeDb(db);
-      return send(res, 200, { user: publicUser(user) });
-    }
-
-    // ── Admin: update win probability per user (override) ─────────────────
-    if (req.method === 'POST' && url.pathname === '/api/admin/users/trading') {
-      if (!requireAdmin(req, res)) return;
-      const body = await parseBody(req);
-      const user = findUser(db, body.userId);
-      if (!user) return send(res, 404, { error: 'User not found' });
-      if (body.winProbabilityOverride !== undefined) {
-        const p = Number(body.winProbabilityOverride);
-        user.winProbabilityOverride = (p === -1) ? undefined : Math.min(0.99, Math.max(0, p));
-      }
-      if (body.tradingDisabled !== undefined) user.tradingDisabled = Boolean(body.tradingDisabled);
-      await writeDb(db);
-      return send(res, 200, { user: publicUser(user) });
-    }
-
-    // ── Admin: send notification to user ──────────────────────────────────
-    if (req.method === 'POST' && url.pathname === '/api/admin/notifications/send') {
-      if (!requireAdmin(req, res)) return;
-      const body = await parseBody(req);
-      const note = {
-        id: id('ntf'),
-        userId: body.userId || null,
-        title: String(body.title || '').slice(0, 100),
-        message: String(body.message || '').slice(0, 500),
-        type: String(body.type || 'info'),
-        read: false,
-        createdAt: now()
-      };
-      if (!db.notifications) db.notifications = [];
-      db.notifications.push(note);
-      await writeDb(db);
-      return send(res, 200, { notification: note });
-    }
-
-    // ── Admin: get notifications ───────────────────────────────────────────
-    if (req.method === 'GET' && url.pathname === '/api/admin/notifications') {
-      if (!requireAdmin(req, res)) return;
-      return send(res, 200, { notifications: (db.notifications || []).slice(-100) });
-    }
-
-    // ── User: update profile ──────────────────────────────────────────────
-    if (req.method === 'POST' && url.pathname === '/api/user/profile/update') {
-      const user = authenticate(req, db);
-      if (!user) return send(res, 401, { error: 'Authentication required' });
-      const body = await parseBody(req);
-      if (body.name) user.name = String(body.name).trim().slice(0, 80);
-      if (body.phone) user.phone = String(body.phone).trim().slice(0, 20);
-      if (body.currency) user.currency = String(body.currency).slice(0, 5);
-      if (body.notifications !== undefined) user.notifications = Boolean(body.notifications);
-      if (body.twoFactor !== undefined) user.twoFactor = Boolean(body.twoFactor);
-      if (body.avatar) user.avatar = String(body.avatar).slice(0, 2000); // base64 small avatar
-      // Password change
-      if (body.newPassword && body.currentPassword) {
-        if (!verifyPassword(body.currentPassword, user.passwordHash)) {
-          return send(res, 400, { error: 'Current password is incorrect' });
-        }
-        if (String(body.newPassword).length < 6) return send(res, 400, { error: 'New password must be at least 6 characters' });
-        user.passwordHash = hashPassword(body.newPassword);
-      }
-      await writeDb(db);
-      return send(res, 200, { user: publicUser(user) });
-    }
-
-    // ── User: get own notifications ───────────────────────────────────────
-    if (req.method === 'GET' && url.pathname === '/api/user/notifications') {
-      const user = authenticate(req, db);
-      if (!user) return send(res, 401, { error: 'Authentication required' });
-      const notes = (db.notifications || []).filter(n => !n.userId || n.userId === user.id);
-      return send(res, 200, { notifications: notes.slice(-50) });
-    }
-
-    // ── Admin: full summary with extra data ──────────────────────────────
-    if (req.method === 'GET' && url.pathname === '/api/admin/full') {
-      if (!requireAdmin(req, res)) return;
-      const totalDeposited = db.deposits.filter(d=>d.status==='completed').reduce((s,d)=>s+(d.amount||0),0);
-      const totalWithdrawn = db.withdrawals.filter(w=>w.status==='paid').reduce((s,w)=>s+(w.amount||0),0);
-      const totalProfit    = db.trades.reduce((s,t)=>s+(t.won?-(t.profit||0):(t.stake||0)),0);
-      const winCount  = db.trades.filter(t=>t.won).length;
-      const lossCount = db.trades.filter(t=>!t.won).length;
-      return send(res, 200, {
-        config: db.config,
-        users: db.users.map(publicUser),
-        deposits: db.deposits,
-        withdrawals: db.withdrawals,
-        trades: db.trades,
-        ledger: db.ledger.slice(-500),
-        notifications: (db.notifications||[]),
-        stats: { totalDeposited, totalWithdrawn, totalProfit, winCount, lossCount,
-                 userCount: db.users.length, tradeCount: db.trades.length }
-      });
-    }
-
-    // Admin login — just validates the key and returns config snapshot
-    if (req.method === 'POST' && url.pathname === '/api/admin/login') {
-      const body = await parseBody(req);
-      const key = String(body.key || req.headers['x-admin-key'] || '');
-      if (key !== ADMIN_KEY) return send(res, 401, { error: 'Invalid admin key' });
-      return send(res, 200, { ok: true, config: db.config });
     }
 
     return send(res, 404, { error: 'API route not found' });
@@ -1262,12 +1207,6 @@ const server = http.createServer((req, res) => {
   if (url.pathname === '/dashboard' || url.pathname === '/dashboard.html') {
     return serveFile(res, path.join(__dirname, 'dashboard.html'), 'text/html; charset=utf-8');
   }
-  if (url.pathname === '/admin' || url.pathname === '/admin.html') {
-    return serveFile(res, path.join(__dirname, 'admin.html'), 'text/html; charset=utf-8');
-  }
-  if (url.pathname === '/settings' || url.pathname === '/settings.html') {
-    return serveFile(res, path.join(__dirname, 'settings.html'), 'text/html; charset=utf-8');
-  }
 
   const filePath = path.normalize(path.join(__dirname, url.pathname));
   if (!filePath.startsWith(__dirname)) {
@@ -1281,6 +1220,16 @@ const server = http.createServer((req, res) => {
 
 // Initialize in-memory database on startup
 initializeMemoryDb();
+
+// Seed the built-in admin account asynchronously after startup
+(async () => {
+  try {
+    const db = await readDb();
+    await ensureAdminAccount(db);
+  } catch (e) {
+    console.error('[ADMIN] Failed to seed admin account:', e.message);
+  }
+})();
 
 server.listen(PORT, () => {
   console.log(`Elite Binary backend running at http://localhost:${PORT}`);
