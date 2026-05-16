@@ -670,6 +670,20 @@ const DB_USERS='eb_users', DB_SESSION='eb_session', DB_CONFIG='eb_config', DB_RE
 function getDB(){ try{ return JSON.parse(localStorage.getItem(DB_USERS)||'[]'); }catch(e){ return []; } }
 function saveDB(u){ localStorage.setItem(DB_USERS,JSON.stringify(u)); }
 function getSess(){ try{ return JSON.parse(localStorage.getItem(DB_SESSION)||'null'); }catch(e){ return null; } }
+function saveSess(s){ localStorage.setItem(DB_SESSION, JSON.stringify(s)); }
+
+// ── Migrate existing users: ensure demo_balance is always set ──
+(function migrateUsers(){
+  try{
+    const users=getDB();
+    let changed=false;
+    users.forEach(u=>{
+      if(u.demo_balance==null){ u.demo_balance=u.balance>0?u.balance:10000; changed=true; }
+      if(u.real_balance==null){ u.real_balance=0; changed=true; }
+    });
+    if(changed) saveDB(users);
+  }catch(_){}
+})();
 function getConfig(){ try{ return JSON.parse(localStorage.getItem(DB_CONFIG)||'{"win_probability":0.5,"payout_rate":0.952,"min_stake":0.35,"max_stake":10000,"min_deposit":10,"min_withdrawal":10,"auto_approve_withdrawals":false}'); }catch(e){ return {win_probability:0.5,payout_rate:0.952,min_stake:0.35,max_stake:10000,min_deposit:10,min_withdrawal:10,auto_approve_withdrawals:false}; } }
 function saveUserToDB(user){ const users=getDB(); const idx=users.findIndex(u=>u.id===user.id); if(idx>=0)users[idx]=user; else users.push(user); saveDB(users); localStorage.setItem('eliteBinaryUser',JSON.stringify(user)); }
 
@@ -741,30 +755,68 @@ const DEP_PH={mpesa:'e.g. 0712345678',card:'e.g. 4111 1111 1111 1111',bank:'e.g.
   if(!session){window.location.href='/index.html';return;}
   if(session.expiry&&Date.now()>session.expiry){localStorage.removeItem(DB_SESSION);window.location.href='/index.html';return;}
 
-  // Server-JWT path: admin (and API-registered users) have a serverToken in session
-  const serverToken = session.serverToken || localStorage.getItem('eliteBinaryToken');
-  if (serverToken) {
-    // Store for API calls; checkAdminRole() will fire after boot
-    currentToken = serverToken;
-    localStorage.setItem('eliteBinaryToken', serverToken);
+  // Resolve token — prefer session.serverToken, then localStorage, then session.token
+  const resolvedToken = session.serverToken || localStorage.getItem('eliteBinaryToken') || session.token || null;
+  if(resolvedToken){
+    currentToken = resolvedToken;
+    localStorage.setItem('eliteBinaryToken', resolvedToken);
   }
 
   const users=getDB();
-  // Allow session without local user record when a server token is present (admin case)
-  const user=users.find(u=>u.id===session.userId&&u.password===session.pwHash)
-    || (session.userId ? {id:session.userId, name:session.userName||'Admin', identifier:session.userEmail||'', balance:0, demo:false, role:session.userRole||'user'} : null);
+  let user = users.find(u=>u.id===session.userId && u.password===session.pwHash);
+
+  if(!user && resolvedToken && session.userId){
+    // Server-JWT session (admin or API-registered user) — build a local shell
+    // We'll hydrate real balances from the server below
+    user = {
+      id: session.userId,
+      name: session.userName || 'User',
+      email: session.userEmail || '',
+      identifier: session.userEmail || '',
+      balance: 0,
+      demo_balance: 10000,   // every account starts with $10,000 demo
+      real_balance: 0,
+      demo: false,
+      role: session.userRole || 'user'
+    };
+  }
+
   if(!user){localStorage.removeItem(DB_SESSION);window.location.href='/index.html';return;}
-  currentUser=user; currentToken=currentToken||session.token;
-  // Load demo and real balances separately
-  demoBalance = user.demo_balance ?? user.balance ?? 10000;
+
+  currentUser = user;
+
+  // ── Balance resolution ─────────────────────────────────────────────
+  // demo_balance: use stored value, fall back to 10000 (never 0)
+  // real_balance: use stored value, fall back to 0
+  demoBalance = (user.demo_balance != null && user.demo_balance > 0)
+    ? user.demo_balance
+    : (user.balance > 0 && user.demo !== false ? user.balance : 10000);
   realBalance = user.real_balance ?? 0;
   balance = accountMode==='demo' ? demoBalance : realBalance;
+
   cfg=getConfig();
   tradeHistory=JSON.parse(localStorage.getItem('eb_trades_'+user.id)||'[]');
   localStorage.setItem('eliteBinaryUser',JSON.stringify(user));
-  if(currentToken) localStorage.setItem('eliteBinaryToken',currentToken);
+
   initCanvas(); renderDigitRow(); renderExecBtns();
   connectWS(); updateBalDisp(); updateAcctInfo(); updateStats();
+
+  // ── For server-JWT sessions: fetch live balance from server ────────
+  if(resolvedToken){
+    fetch('/api/wallet',{headers:{'Authorization':'Bearer '+resolvedToken}})
+      .then(r=>r.ok?r.json():null)
+      .then(d=>{
+        if(!d||!d.user)return;
+        // Only update real balance from server; demo stays local
+        realBalance = typeof d.user.balance==='number' ? d.user.balance : realBalance;
+        if(accountMode==='real'){ balance=realBalance; updateBalDisp(); }
+        const ddReal=document.getElementById('dd-real');
+        if(ddReal) ddReal.textContent='$'+realBalance.toFixed(2);
+      }).catch(()=>{});
+    // Check admin role after token is confirmed ready
+    checkAdminRole();
+  }
+
   setInterval(()=>{cfg=getConfig();renderExecBtns();},5000);
   window.addEventListener('resize',()=>{resizeCanvas();drawChart();});
   document.addEventListener('click',e=>{
@@ -1937,14 +1989,51 @@ function logout(){
 // ══════════════════════════════════════════════════════════════
 // ADMIN PANEL — role-based, completely hidden from normal users
 // ══════════════════════════════════════════════════════════════
-const API_BASE = '';  // same origin
 
 function admToken() {
-  return localStorage.getItem('eliteBinaryToken') || currentToken || '';
+  // Prefer in-memory token (set by boot), fall back to localStorage
+  return currentToken || localStorage.getItem('eliteBinaryToken') || '';
 }
 
 function admHeaders() {
   return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + admToken() };
+}
+
+function revealAdminUI() {
+  const sheet = document.getElementById('admin-sheet');
+  const btn   = document.getElementById('admin-acct-btn');
+  if(sheet) sheet.style.display = '';
+  if(btn)   btn.style.display   = '';
+}
+
+// Called from boot — checks server AND local session for admin role
+async function checkAdminRole() {
+  // 1. Quick local check: if session already carries role=admin, reveal immediately
+  try {
+    const session = getSess();
+    if(session && session.userRole === 'admin') { revealAdminUI(); return; }
+    // Also check the local user record
+    if(currentUser && currentUser.role === 'admin') { revealAdminUI(); return; }
+  } catch(_) {}
+
+  // 2. Server check via JWT
+  const token = admToken();
+  if(!token) return;
+  try {
+    const res = await fetch('/api/admin/me', {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    if(!res.ok) return;
+    const data = await res.json();
+    if(data.admin) {
+      revealAdminUI();
+      // Persist the admin role in the session so future local checks succeed
+      try {
+        const s = getSess();
+        if(s){ s.userRole='admin'; saveSess(s); }
+      } catch(_) {}
+    }
+  } catch(_) {}
 }
 
 // Called after login to check if the user is an admin, and reveal the hidden entry point
@@ -2096,8 +2185,7 @@ async function admApproveDeposit() {
   } catch (e) { msgEl.textContent = '✗ ' + e.message; msgEl.style.color = 'var(--red)'; }
 }
 
-// Run the admin check after the boot sequence completes
-setTimeout(checkAdminRole, 800);
+// checkAdminRole() is called directly from boot() after token is confirmed ready.
 </script>
 </body>
 </html>
