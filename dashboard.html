@@ -297,7 +297,7 @@ button,input,select{font-family:inherit;outline:none;border:none;background:none
   <div class="topbar">
     <div class="tb-left">
       <div class="hamburger" onclick="openSheet('menu-sheet')"><span></span><span></span></div>
-      <div class="brand-avatar">EB</div>
+      <div class="brand-avatar" onclick="_onLogoBrand()" style="cursor:pointer">EB</div>
     </div>
     <div class="tb-center">
       <div class="bal-pill" onclick="toggleAccDrop()">
@@ -481,7 +481,7 @@ button,input,select{font-family:inherit;outline:none;border:none;background:none
 <div class="sheet" id="menu-sheet">
   <div class="sheet-knob"></div>
   <div style="font-size:1rem;font-weight:800;color:var(--blue);margin-bottom:14px;display:flex;align-items:center;gap:8px">
-    <div style="width:26px;height:26px;background:linear-gradient(135deg,#e11d48,#be123c);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.68rem;font-weight:900;color:#fff">EB</div>EliteBinary
+    <div style="width:26px;height:26px;background:linear-gradient(135deg,#e11d48,#be123c);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.68rem;font-weight:900;color:#fff;cursor:pointer" onclick="_onLogoBrand()">EB</div>EliteBinary
   </div>
   <div class="menu-row" onclick="closeAllSheets()">📊 Trading</div>
   <div class="menu-row" onclick="setNav('hist');closeSheet('menu-sheet')">📋 Trade History</div>
@@ -489,6 +489,11 @@ button,input,select{font-family:inherit;outline:none;border:none;background:none
   <div class="menu-row" onclick="openSheet('ref-sheet');closeSheet('menu-sheet')">🔗 My Referrals</div>
   <div class="menu-row" onclick="openSheet('dep-sheet');closeSheet('menu-sheet')">💳 Wallet</div>
   <div class="menu-row" onclick="setNav('acct');closeSheet('menu-sheet')">👤 Account</div>
+  <!-- ADMIN SIDEBAR ENTRY — hidden from normal users, revealed by revealAdminUI() -->
+  <div id="menu-admin-row" class="menu-row" onclick="openSheet('admin-sheet');closeSheet('menu-sheet');admLoadSummary()"
+    style="display:none;color:#e11d48;background:linear-gradient(135deg,rgba(225,29,72,.08),rgba(124,58,237,.08));border:1px solid rgba(225,29,72,.25);border-radius:9px;margin-top:4px;font-weight:800">
+    🛡️ Admin Panel
+  </div>
   <div style="height:1px;background:var(--border);margin:8px 0"></div>
   <div class="menu-row" onclick="dlApp()" style="color:var(--blue)">📱 Download App</div>
   <div class="menu-row" onclick="logout()" style="color:var(--red)">🚪 Logout</div>
@@ -1990,202 +1995,198 @@ function logout(){
 // ADMIN PANEL — role-based, completely hidden from normal users
 // ══════════════════════════════════════════════════════════════
 
-function admToken() {
-  // Prefer in-memory token (set by boot), fall back to localStorage
-  return currentToken || localStorage.getItem('eliteBinaryToken') || '';
+// ══════════════════════════════════════════════════════════════
+// ADMIN ENGINE — works both with and without the Node server
+// ══════════════════════════════════════════════════════════════
+
+const _ADM_EMAIL = 'admin@elitebinary.com';
+const _ADM_PW    = '@elitebinary2002';
+
+function admToken(){ return currentToken || localStorage.getItem('eliteBinaryToken') || ''; }
+function admHeaders(){ return {'Content-Type':'application/json','Authorization':'Bearer '+admToken()}; }
+
+function revealAdminUI(){
+  ['admin-sheet','admin-acct-btn','menu-admin-row'].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.style.display='';
+  });
+  document.body.setAttribute('data-role','admin');
+  try{ const s=getSess(); if(s&&s.userRole!=='admin'){s.userRole='admin';saveSess(s);} }catch(_){}
 }
 
-function admHeaders() {
-  return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + admToken() };
+// ── Hidden tap-unlock: tap the EB logo 5 times quickly ────────
+let _admTaps=0,_admTapTmr=null;
+function _onLogoBrand(){
+  _admTaps++; clearTimeout(_admTapTmr);
+  if(_admTaps>=5){ _admTaps=0; _promptAdminUnlock(); return; }
+  _admTapTmr=setTimeout(()=>{ _admTaps=0; },1800);
 }
-
-function revealAdminUI() {
-  const sheet = document.getElementById('admin-sheet');
-  const btn   = document.getElementById('admin-acct-btn');
-  if(sheet) sheet.style.display = '';
-  if(btn)   btn.style.display   = '';
-}
-
-// Called from boot — checks server AND local session for admin role
-async function checkAdminRole() {
-  // 1. Quick local check: if session already carries role=admin, reveal immediately
-  try {
-    const session = getSess();
-    if(session && session.userRole === 'admin') { revealAdminUI(); return; }
-    // Also check the local user record
-    if(currentUser && currentUser.role === 'admin') { revealAdminUI(); return; }
-  } catch(_) {}
-
-  // 2. Server check via JWT
-  const token = admToken();
-  if(!token) return;
-  try {
-    const res = await fetch('/api/admin/me', {
-      headers: { 'Authorization': 'Bearer ' + token }
-    });
-    if(!res.ok) return;
-    const data = await res.json();
-    if(data.admin) {
-      revealAdminUI();
-      // Persist the admin role in the session so future local checks succeed
-      try {
-        const s = getSess();
-        if(s){ s.userRole='admin'; saveSess(s); }
-      } catch(_) {}
-    }
-  } catch(_) {}
-}
-
-// Called after login to check if the user is an admin, and reveal the hidden entry point
-async function checkAdminRole() {
-  try {
-    const res = await fetch(API_BASE + '/api/admin/me', { headers: admHeaders() });
-    if (!res.ok) return;
-    const data = await res.json();
-    if (data.admin) {
-      // Reveal admin entry only inside the account sheet — no public link
-      document.getElementById('admin-sheet').style.display = '';
-      const adminBtn = document.getElementById('admin-acct-btn');
-      if (adminBtn) adminBtn.style.display = '';
-      console.log('[Admin] Admin session detected');
-    }
-  } catch (_) {}
-}
-
-async function admLoadSummary() {
-  const msg = (id, text, color) => {
-    const el = document.getElementById(id);
-    if (el) { el.textContent = text; el.style.color = color || 'var(--green)'; }
-  };
-  try {
-    const res = await fetch(API_BASE + '/api/admin/summary', { headers: admHeaders() });
-    if (!res.ok) { msg('adm-cfg-msg', '✗ ' + (await res.json()).error, 'var(--red)'); return; }
-    const d = await res.json();
-
-    // Populate stats
-    document.getElementById('adm-stat-users').textContent = (d.users || []).length;
-    document.getElementById('adm-stat-trades').textContent = (d.trades || []).length;
-    document.getElementById('adm-stat-deps').textContent = (d.deposits || []).length;
-    document.getElementById('adm-stat-wds').textContent = (d.withdrawals || []).length;
-
-    // Populate config inputs
-    if (d.config) {
-      document.getElementById('adm-payout').value = d.config.payoutRate ?? 0.9;
-      document.getElementById('adm-winprob').value = d.config.winProbability ?? 0.5;
-      document.getElementById('adm-delay').value = d.config.settlementDelayMs ?? 900;
-      document.getElementById('adm-mock').value = String(d.config.mockPayments ?? true);
-      document.getElementById('adm-wallet').value = d.config.designatedWallet ?? '';
-    }
-
-    // Render user list
-    const ul = document.getElementById('adm-users-list');
-    const users = (d.users || []).filter(u => u.role !== 'admin').slice(-20).reverse();
-    if (!users.length) {
-      ul.innerHTML = '<div class="empty-s"><div class="empty-i">👥</div>No users yet</div>';
-    } else {
-      ul.innerHTML = users.map(u => `
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)">
-          <div>
-            <div style="font-size:.78rem;font-weight:700;color:var(--text)">${u.name || u.identifier}</div>
-            <div style="font-size:.65rem;color:var(--text3)">${u.id} · ${u.demo ? 'Demo' : 'Real'} · ${u.suspended ? '🔴 Suspended' : '🟢 Active'}</div>
-          </div>
-          <div style="font-family:'JetBrains Mono',monospace;font-size:.82rem;font-weight:700;color:var(--amber)">$${(u.balance||0).toFixed(2)}</div>
-        </div>`).join('');
-    }
-    showToast('Admin', 'Summary loaded', 'ok');
-  } catch (e) {
-    showToast('Error', e.message, 'loss');
+function _promptAdminUnlock(){
+  const email=(prompt('Admin Email:')||'').trim().toLowerCase();
+  if(!email) return;
+  const pw=prompt('Admin Password:')||'';
+  if(email===_ADM_EMAIL && pw===_ADM_PW){
+    revealAdminUI();
+    showToast('Admin','Panel unlocked ✓','ok');
+    admLoadSummary();
+    openSheet('admin-sheet');
+  } else {
+    showToast('Access Denied','Invalid credentials','loss');
   }
 }
 
-async function admSaveConfig() {
-  const msgEl = document.getElementById('adm-cfg-msg');
-  msgEl.textContent = 'Saving…'; msgEl.style.color = 'var(--text3)';
-  try {
-    const body = {
-      payoutRate: parseFloat(document.getElementById('adm-payout').value),
-      winProbability: parseFloat(document.getElementById('adm-winprob').value),
-      settlementDelayMs: parseInt(document.getElementById('adm-delay').value),
-      mockPayments: document.getElementById('adm-mock').value === 'true',
-      designatedWallet: document.getElementById('adm-wallet').value.trim()
-    };
-    const res = await fetch(API_BASE + '/api/admin/config', {
-      method: 'POST', headers: admHeaders(), body: JSON.stringify(body)
-    });
-    const d = await res.json();
-    if (!res.ok) { msgEl.textContent = '✗ ' + d.error; msgEl.style.color = 'var(--red)'; return; }
-    msgEl.textContent = '✓ Config saved'; msgEl.style.color = 'var(--green)';
-    showToast('Admin', 'Config updated', 'ok');
-  } catch (e) { msgEl.textContent = '✗ ' + e.message; msgEl.style.color = 'var(--red)'; }
+async function checkAdminRole(){
+  try{ const s=getSess(); if(s&&s.userRole==='admin'){ revealAdminUI(); return; } }catch(_){}
+  try{ if(currentUser&&currentUser.role==='admin'){ revealAdminUI(); return; } }catch(_){}
+  try{
+    const users=getDB(); const s=getSess();
+    if(s){
+      const u=users.find(u=>u.id===s.userId);
+      if(u&&u.role==='admin'){ revealAdminUI(); return; }
+      if(u&&(u.email||u.identifier||'').toLowerCase()===_ADM_EMAIL){ u.role='admin'; saveDB(users); revealAdminUI(); return; }
+    }
+  }catch(_){}
+  const token=admToken(); if(!token) return;
+  try{
+    const res=await fetch('/api/admin/me',{headers:{'Authorization':'Bearer '+token}});
+    if(!res.ok) return;
+    const d=await res.json();
+    if(d.admin){
+      revealAdminUI();
+      try{ if(currentUser){currentUser.role='admin';saveUserToDB(currentUser);} }catch(_){}
+    }
+  }catch(_){}
 }
 
-async function admSuspendUser(suspend) {
-  const userId = document.getElementById('adm-user-id').value.trim();
-  const msgEl = document.getElementById('adm-user-msg');
-  if (!userId) { msgEl.textContent = '✗ Enter a user ID'; msgEl.style.color = 'var(--red)'; return; }
-  msgEl.textContent = 'Processing…'; msgEl.style.color = 'var(--text3)';
-  try {
-    const res = await fetch(API_BASE + '/api/admin/users/suspend', {
-      method: 'POST', headers: admHeaders(), body: JSON.stringify({ userId, suspended: suspend })
-    });
-    const d = await res.json();
-    if (!res.ok) { msgEl.textContent = '✗ ' + d.error; msgEl.style.color = 'var(--red)'; return; }
-    msgEl.textContent = suspend ? '✓ User suspended' : '✓ User unsuspended';
-    msgEl.style.color = 'var(--green)';
-  } catch (e) { msgEl.textContent = '✗ ' + e.message; msgEl.style.color = 'var(--red)'; }
+async function admLoadSummary(){
+  try{
+    const res=await fetch('/api/admin/summary',{headers:admHeaders()});
+    if(res.ok){ const d=await res.json(); _renderSummary(d); showToast('Admin','Summary loaded','ok'); return; }
+  }catch(_){}
+  try{
+    const users=getDB().filter(u=>u.role!=='admin');
+    _renderSummary({users,trades:[],deposits:[],withdrawals:[],config:getConfig()});
+    showToast('Admin','Loaded locally (offline)','ok');
+  }catch(e){ showToast('Error',e.message,'loss'); }
 }
 
-async function admCreditUser() {
-  const userId = document.getElementById('adm-user-id').value.trim();
-  const amount = parseFloat(document.getElementById('adm-credit-amt').value);
-  const msgEl = document.getElementById('adm-user-msg');
-  if (!userId) { msgEl.textContent = '✗ Enter a user ID'; msgEl.style.color = 'var(--red)'; return; }
-  if (!amount || isNaN(amount)) { msgEl.textContent = '✗ Enter a valid amount'; msgEl.style.color = 'var(--red)'; return; }
-  msgEl.textContent = 'Processing…'; msgEl.style.color = 'var(--text3)';
-  try {
-    const res = await fetch(API_BASE + '/api/admin/users/credit', {
-      method: 'POST', headers: admHeaders(), body: JSON.stringify({ userId, amount })
-    });
-    const d = await res.json();
-    if (!res.ok) { msgEl.textContent = '✗ ' + d.error; msgEl.style.color = 'var(--red)'; return; }
-    msgEl.textContent = `✓ Balance updated → $${(d.user.balance||0).toFixed(2)}`;
-    msgEl.style.color = 'var(--green)';
-  } catch (e) { msgEl.textContent = '✗ ' + e.message; msgEl.style.color = 'var(--red)'; }
+function _renderSummary(d){
+  document.getElementById('adm-stat-users').textContent=(d.users||[]).length;
+  document.getElementById('adm-stat-trades').textContent=(d.trades||[]).length;
+  document.getElementById('adm-stat-deps').textContent=(d.deposits||[]).length;
+  document.getElementById('adm-stat-wds').textContent=(d.withdrawals||[]).length;
+  if(d.config){
+    document.getElementById('adm-payout').value=d.config.payoutRate??d.config.payout_rate??0.9;
+    document.getElementById('adm-winprob').value=d.config.winProbability??d.config.win_probability??0.5;
+    document.getElementById('adm-delay').value=d.config.settlementDelayMs??900;
+    document.getElementById('adm-mock').value=String(d.config.mockPayments??true);
+    document.getElementById('adm-wallet').value=d.config.designatedWallet??d.config.wallet??'';
+  }
+  const ul=document.getElementById('adm-users-list');
+  const users=(d.users||[]).filter(u=>u.role!=='admin').slice(-30).reverse();
+  if(!users.length){ ul.innerHTML='<div class="empty-s"><div class="empty-i">👥</div>No users yet</div>'; return; }
+  ul.innerHTML=users.map(u=>`
+    <div onclick="document.getElementById('adm-user-id').value='${u.id||''}'"
+      style="display:flex;align-items:center;justify-content:space-between;padding:9px 4px;border-bottom:1px solid var(--border);cursor:pointer">
+      <div>
+        <div style="font-size:.78rem;font-weight:700;color:var(--text)">${u.name||u.email||u.identifier||'—'}</div>
+        <div style="font-size:.62rem;color:var(--text3)">${u.id||''} · ${u.email||u.identifier||''}</div>
+        <div style="font-size:.62rem;color:${u.suspended?'var(--red)':'var(--green)'}">${u.suspended?'🔴 Suspended':'🟢 Active'} · ${u.demo?'Demo':'Real'}</div>
+      </div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:.85rem;font-weight:800;color:var(--amber)">$${((u.balance||0)).toFixed(2)}</div>
+    </div>`).join('');
 }
 
-async function admApproveWd(action) {
-  const withdrawalId = document.getElementById('adm-wd-id').value.trim();
-  const msgEl = document.getElementById('adm-wd-msg');
-  if (!withdrawalId) { msgEl.textContent = '✗ Enter a withdrawal ID'; msgEl.style.color = 'var(--red)'; return; }
-  msgEl.textContent = 'Processing…'; msgEl.style.color = 'var(--text3)';
-  try {
-    const res = await fetch(API_BASE + '/api/admin/withdrawals/approve', {
-      method: 'POST', headers: admHeaders(), body: JSON.stringify({ withdrawalId, action })
-    });
-    const d = await res.json();
-    if (!res.ok) { msgEl.textContent = '✗ ' + d.error; msgEl.style.color = 'var(--red)'; return; }
-    msgEl.textContent = action === 'approve' ? '✓ Withdrawal approved' : '✓ Withdrawal rejected & refunded';
-    msgEl.style.color = action === 'approve' ? 'var(--green)' : 'var(--amber)';
-  } catch (e) { msgEl.textContent = '✗ ' + e.message; msgEl.style.color = 'var(--red)'; }
+async function admSaveConfig(){
+  const msgEl=document.getElementById('adm-cfg-msg');
+  msgEl.textContent='Saving…'; msgEl.style.color='var(--text3)';
+  const body={
+    payoutRate:parseFloat(document.getElementById('adm-payout').value),
+    winProbability:parseFloat(document.getElementById('adm-winprob').value),
+    settlementDelayMs:parseInt(document.getElementById('adm-delay').value),
+    mockPayments:document.getElementById('adm-mock').value==='true',
+    designatedWallet:document.getElementById('adm-wallet').value.trim()
+  };
+  try{
+    const res=await fetch('/api/admin/config',{method:'POST',headers:admHeaders(),body:JSON.stringify(body)});
+    const d=await res.json();
+    if(!res.ok){ msgEl.textContent='✗ '+d.error; msgEl.style.color='var(--red)'; return; }
+    msgEl.textContent='✓ Config saved'; msgEl.style.color='var(--green)'; showToast('Admin','Config updated','ok'); return;
+  }catch(_){}
+  try{
+    const cfg=getConfig();
+    Object.assign(cfg,{payout_rate:body.payoutRate,win_probability:body.winProbability,mockPayments:body.mockPayments,wallet:body.designatedWallet});
+    localStorage.setItem(DB_CONFIG,JSON.stringify(cfg));
+    msgEl.textContent='✓ Saved locally (offline)'; msgEl.style.color='var(--green)';
+    showToast('Admin','Config saved locally','ok');
+  }catch(e){ msgEl.textContent='✗ '+e.message; msgEl.style.color='var(--red)'; }
 }
 
-async function admApproveDeposit() {
-  const depositId = document.getElementById('adm-dep-id').value.trim();
-  const msgEl = document.getElementById('adm-dep-msg');
-  if (!depositId) { msgEl.textContent = '✗ Enter a deposit ID'; msgEl.style.color = 'var(--red)'; return; }
-  msgEl.textContent = 'Processing…'; msgEl.style.color = 'var(--text3)';
-  try {
-    const res = await fetch(API_BASE + '/api/admin/deposits/approve', {
-      method: 'POST', headers: admHeaders(), body: JSON.stringify({ depositId })
-    });
-    const d = await res.json();
-    if (!res.ok) { msgEl.textContent = '✗ ' + d.error; msgEl.style.color = 'var(--red)'; return; }
-    msgEl.textContent = '✓ Deposit approved & balance credited';
-    msgEl.style.color = 'var(--green)';
-  } catch (e) { msgEl.textContent = '✗ ' + e.message; msgEl.style.color = 'var(--red)'; }
+async function admSuspendUser(suspend){
+  const userId=document.getElementById('adm-user-id').value.trim();
+  const msgEl=document.getElementById('adm-user-msg');
+  if(!userId){ msgEl.textContent='✗ Tap a user above or enter ID'; msgEl.style.color='var(--red)'; return; }
+  msgEl.textContent='Processing…'; msgEl.style.color='var(--text3)';
+  try{
+    const res=await fetch('/api/admin/users/suspend',{method:'POST',headers:admHeaders(),body:JSON.stringify({userId,suspended:suspend})});
+    const d=await res.json();
+    if(!res.ok){ msgEl.textContent='✗ '+d.error; msgEl.style.color='var(--red)'; return; }
+    msgEl.textContent=suspend?'✓ Suspended':'✓ Unsuspended'; msgEl.style.color='var(--green)'; admLoadSummary(); return;
+  }catch(_){}
+  try{
+    const users=getDB(); const u=users.find(u=>u.id===userId);
+    if(!u){ msgEl.textContent='✗ User not found'; msgEl.style.color='var(--red)'; return; }
+    u.suspended=suspend; saveDB(users);
+    msgEl.textContent=(suspend?'✓ Suspended':'✓ Unsuspended')+' (local)'; msgEl.style.color='var(--green)'; admLoadSummary();
+  }catch(e){ msgEl.textContent='✗ '+e.message; msgEl.style.color='var(--red)'; }
 }
 
-// checkAdminRole() is called directly from boot() after token is confirmed ready.
+async function admCreditUser(){
+  const userId=document.getElementById('adm-user-id').value.trim();
+  const amount=parseFloat(document.getElementById('adm-credit-amt').value);
+  const msgEl=document.getElementById('adm-user-msg');
+  if(!userId){ msgEl.textContent='✗ Tap a user above or enter ID'; msgEl.style.color='var(--red)'; return; }
+  if(!amount||isNaN(amount)){ msgEl.textContent='✗ Enter a valid amount'; msgEl.style.color='var(--red)'; return; }
+  msgEl.textContent='Processing…'; msgEl.style.color='var(--text3)';
+  try{
+    const res=await fetch('/api/admin/users/credit',{method:'POST',headers:admHeaders(),body:JSON.stringify({userId,amount})});
+    const d=await res.json();
+    if(!res.ok){ msgEl.textContent='✗ '+d.error; msgEl.style.color='var(--red)'; return; }
+    msgEl.textContent='✓ Balance → $'+(d.user.balance||0).toFixed(2); msgEl.style.color='var(--green)'; admLoadSummary(); return;
+  }catch(_){}
+  try{
+    const users=getDB(); const u=users.find(u=>u.id===userId);
+    if(!u){ msgEl.textContent='✗ User not found'; msgEl.style.color='var(--red)'; return; }
+    u.balance=Math.round(((u.balance||0)+amount)*100)/100; u.real_balance=u.balance; saveDB(users);
+    msgEl.textContent='✓ Balance → $'+u.balance.toFixed(2)+' (local)'; msgEl.style.color='var(--green)'; admLoadSummary();
+  }catch(e){ msgEl.textContent='✗ '+e.message; msgEl.style.color='var(--red)'; }
+}
+
+async function admApproveWd(action){
+  const withdrawalId=document.getElementById('adm-wd-id').value.trim();
+  const msgEl=document.getElementById('adm-wd-msg');
+  if(!withdrawalId){ msgEl.textContent='✗ Enter a withdrawal ID'; msgEl.style.color='var(--red)'; return; }
+  msgEl.textContent='Processing…'; msgEl.style.color='var(--text3)';
+  try{
+    const res=await fetch('/api/admin/withdrawals/approve',{method:'POST',headers:admHeaders(),body:JSON.stringify({withdrawalId,action})});
+    const d=await res.json();
+    if(!res.ok){ msgEl.textContent='✗ '+d.error; msgEl.style.color='var(--red)'; return; }
+    msgEl.textContent=action==='approve'?'✓ Approved':'✓ Rejected & refunded';
+    msgEl.style.color=action==='approve'?'var(--green)':'var(--amber)';
+  }catch(e){ msgEl.textContent='✗ Server unavailable: run npm start'; msgEl.style.color='var(--red)'; }
+}
+
+async function admApproveDeposit(){
+  const depositId=document.getElementById('adm-dep-id').value.trim();
+  const msgEl=document.getElementById('adm-dep-msg');
+  if(!depositId){ msgEl.textContent='✗ Enter a deposit ID'; msgEl.style.color='var(--red)'; return; }
+  msgEl.textContent='Processing…'; msgEl.style.color='var(--text3)';
+  try{
+    const res=await fetch('/api/admin/deposits/approve',{method:'POST',headers:admHeaders(),body:JSON.stringify({depositId})});
+    const d=await res.json();
+    if(!res.ok){ msgEl.textContent='✗ '+d.error; msgEl.style.color='var(--red)'; return; }
+    msgEl.textContent='✓ Deposit approved & credited'; msgEl.style.color='var(--green)';
+  }catch(e){ msgEl.textContent='✗ Server unavailable: run npm start'; msgEl.style.color='var(--red)'; }
+}
 </script>
 </body>
 </html>
