@@ -541,7 +541,7 @@ button,input,select{font-family:inherit;outline:none;border:none;background:none
     <button class="dep-m" onclick="selectDep(this,'bank','Bank Transfer')">Bank</button>
     <button class="dep-m" onclick="selectDep(this,'crypto','Crypto Deposit')">Crypto</button>
   </div>
-  <input class="dep-input" type="number" id="dep-amt" placeholder="Amount (KES e.g. 500)" min="500" oninput="updDepInfo()">
+  <input class="dep-input" type="number" id="dep-amt" placeholder="Amount (USD)" min="10" oninput="updDepInfo()">
   <input class="dep-input" type="text" id="dep-contact" placeholder="e.g. 0712345678">
   <div class="dep-summary">
     <div class="ds-col"><div class="ds-lbl">You Send</div><div class="ds-val" id="ds-send">$0.00</div></div>
@@ -553,7 +553,7 @@ button,input,select{font-family:inherit;outline:none;border:none;background:none
   <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border)">
     <div style="font-size:.82rem;font-weight:700;color:var(--text2);margin-bottom:10px">Withdraw</div>
     <div style="background:var(--green-dim);border:1px solid rgba(34,197,94,.25);border-radius:7px;padding:8px 10px;margin-bottom:9px;font-size:.72rem;color:var(--green)">⚡ Withdrawals processed after admin approval</div>
-    <input class="dep-input" type="number" id="wd-amt" placeholder="Amount in USD (min $3.74)" min="3.74">
+    <input class="dep-input" type="number" id="wd-amt" placeholder="Amount (USD)" min="10">
     <input class="dep-input" type="tel" id="wd-phone" placeholder="+254712345678">
     <button class="sheet-btn red-out" onclick="doWd()">Request Withdrawal</button>
     <div id="wd-msg" style="margin-top:8px;font-size:.78rem;font-weight:600;text-align:center;min-height:18px"></div>
@@ -637,6 +637,8 @@ button,input,select{font-family:inherit;outline:none;border:none;background:none
     <button onclick="openSheet('ref-sheet');closeSheet('acct-sheet')" style="padding:11px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;font-size:.84rem;font-weight:600;color:var(--text);cursor:pointer;text-align:left">🔗 My Referrals</button>
     <button onclick="openSheet('dep-sheet');closeSheet('acct-sheet')" style="padding:11px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;font-size:.84rem;font-weight:600;color:var(--text);cursor:pointer;text-align:left">💳 Wallet & Transactions</button>
     <button onclick="dlApp()" style="padding:11px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;font-size:.84rem;font-weight:600;color:var(--blue);cursor:pointer;text-align:left">📱 Download App</button>
+    <!-- ADMIN BUTTON — hidden from normal users; revealed only when role=admin is detected -->
+    <button id="admin-acct-btn" onclick="openSheet('admin-sheet');closeSheet('acct-sheet');admLoadSummary()" style="display:none;padding:11px;background:linear-gradient(135deg,rgba(225,29,72,.15),rgba(124,58,237,.15));border:1px solid rgba(225,29,72,.4);border-radius:8px;font-size:.84rem;font-weight:700;color:#e11d48;cursor:pointer;text-align:left">🛡️ Admin Panel</button>
     <button onclick="logout()" style="padding:11px;background:var(--red-dim);border:1px solid rgba(239,68,68,.3);border-radius:8px;font-size:.84rem;font-weight:700;color:var(--red);cursor:pointer">Logout</button>
   </div>
 </div>
@@ -738,10 +740,21 @@ const DEP_PH={mpesa:'e.g. 0712345678',card:'e.g. 4111 1111 1111 1111',bank:'e.g.
   const session=getSess();
   if(!session){window.location.href='/index.html';return;}
   if(session.expiry&&Date.now()>session.expiry){localStorage.removeItem(DB_SESSION);window.location.href='/index.html';return;}
+
+  // Server-JWT path: admin (and API-registered users) have a serverToken in session
+  const serverToken = session.serverToken || localStorage.getItem('eliteBinaryToken');
+  if (serverToken) {
+    // Store for API calls; checkAdminRole() will fire after boot
+    currentToken = serverToken;
+    localStorage.setItem('eliteBinaryToken', serverToken);
+  }
+
   const users=getDB();
-  const user=users.find(u=>u.id===session.userId)||(session.userId?{id:session.userId,name:'User',demo_balance:10000,real_balance:0,balance:0}:null);
+  // Allow session without local user record when a server token is present (admin case)
+  const user=users.find(u=>u.id===session.userId&&u.password===session.pwHash)
+    || (session.userId ? {id:session.userId, name:session.userName||'Admin', identifier:session.userEmail||'', balance:0, demo:false, role:session.userRole||'user'} : null);
   if(!user){localStorage.removeItem(DB_SESSION);window.location.href='/index.html';return;}
-  currentUser=user; currentToken=session.token;
+  currentUser=user; currentToken=currentToken||session.token;
   // Load demo and real balances separately
   demoBalance = user.demo_balance ?? user.balance ?? 10000;
   realBalance = user.real_balance ?? 0;
@@ -749,7 +762,7 @@ const DEP_PH={mpesa:'e.g. 0712345678',card:'e.g. 4111 1111 1111 1111',bank:'e.g.
   cfg=getConfig();
   tradeHistory=JSON.parse(localStorage.getItem('eb_trades_'+user.id)||'[]');
   localStorage.setItem('eliteBinaryUser',JSON.stringify(user));
-  localStorage.setItem('eliteBinaryToken',currentToken);
+  if(currentToken) localStorage.setItem('eliteBinaryToken',currentToken);
   initCanvas(); renderDigitRow(); renderExecBtns();
   connectWS(); updateBalDisp(); updateAcctInfo(); updateStats();
   setInterval(()=>{cfg=getConfig();renderExecBtns();},5000);
@@ -1298,10 +1311,6 @@ function pickSym(id,name,el){
 // ══════════════════════════════════════════════
 // DEPOSIT / WITHDRAW
 // ══════════════════════════════════════════════
-const KES_RATE = 130; // 1 USD = 130 KES — update as needed
-const MIN_DEPOSIT_KES = 500;   // KES 500 ≈ $3.74
-const MIN_WITHDRAW_USD = 3.74;
-
 function selectDep(el,method,title){
   depMethod=method;
   document.querySelectorAll('.dep-m').forEach(b=>b.classList.remove('on'));el.classList.add('on');
@@ -1310,20 +1319,19 @@ function selectDep(el,method,title){
   document.getElementById('ds-method').textContent=DEP_METHODS[method];
 }
 function updDepInfo(){
-  const kes=parseFloat(document.getElementById('dep-amt').value)||0;
-  const usd=kes/KES_RATE;
-  document.getElementById('ds-send').textContent='KES '+kes.toLocaleString();
-  document.getElementById('ds-recv').textContent='$'+usd.toFixed(2);
+  const a=parseFloat(document.getElementById('dep-amt').value)||0;
+  document.getElementById('ds-send').textContent='$'+a.toFixed(2);
+  document.getElementById('ds-recv').textContent='$'+a.toFixed(2);
 }
 async function doDep(){
-  const kesAmt=parseFloat(document.getElementById('dep-amt').value)||0;
-  const usdAmt=parseFloat((kesAmt/KES_RATE).toFixed(2));
+  const amt=parseFloat(document.getElementById('dep-amt').value)||0;
   const contact=document.getElementById('dep-contact').value.trim();
   const msg=document.getElementById('dep-msg');
   const btn=document.querySelector('#dep-sheet .sheet-btn.blue');
+  const minDep=cfg.min_deposit||10;
 
   // Validation
-  if(kesAmt<MIN_DEPOSIT_KES){msg.style.color='var(--red)';msg.textContent='Minimum deposit is KES '+MIN_DEPOSIT_KES+' (≈ $'+((MIN_DEPOSIT_KES/KES_RATE).toFixed(2))+')';return;}
+  if(amt<minDep){msg.style.color='var(--red)';msg.textContent='Minimum deposit is $'+minDep;return;}
   if(!contact){msg.style.color='var(--red)';msg.textContent='Please enter your M-Pesa phone number';return;}
   if(depMethod!=='mpesa'){msg.style.color='var(--amber)';msg.textContent='Only M-Pesa is available right now';return;}
 
@@ -1343,8 +1351,7 @@ async function doDep(){
     const resp=await fetch('/api/deposits',{
       method:'POST',
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
-      // Send KES amount to PayHero (M-Pesa expects KES); usdAmt credited to USD balance
-      body:JSON.stringify({method:'mpesa',phone:contact,amount:kesAmt,amountUsd:usdAmt})
+      body:JSON.stringify({method:'mpesa',phone:contact,amount:amt})
     });
     const data=await resp.json();
     if(!resp.ok) throw new Error(data.error||'Deposit failed');
@@ -1352,7 +1359,7 @@ async function doDep(){
     // Record the pending deposit locally for the transaction list
     const dep={
       id:data.deposit?.id||('dep_'+Date.now()),
-      type:'deposit',amountKes:kesAmt,amountUsd:usdAmt,method:'mpesa',contact,
+      type:'deposit',amount:amt,method:'mpesa',contact,
       status:data.deposit?.status||'pending_stk',
       account:'real',
       date:new Date().toLocaleString(),
@@ -1365,11 +1372,11 @@ async function doDep(){
 
     if(data.deposit?.status==='completed'){
       // Mock mode: server credited immediately
-      realBalance=data.user?.balance??realBalance+usdAmt;
+      realBalance=data.user?.balance??realBalance+amt;
       if(accountMode==='real'){balance=realBalance;}
       updateBalDisp();
-      msg.style.color='var(--green)';msg.textContent='✓ KES '+kesAmt.toLocaleString()+' (≈ $'+usdAmt.toFixed(2)+') credited to Real account!';
-      showToast('Deposit Successful','$'+usdAmt.toFixed(2)+' added to Real account','ok');
+      msg.style.color='var(--green)';msg.textContent='✓ $'+amt.toFixed(2)+' credited to Real account!';
+      showToast('Deposit Successful','$'+amt.toFixed(2)+' added to Real account','ok');
       document.getElementById('dep-amt').value='';document.getElementById('dep-contact').value='';
     }else{
       // Real PayHero STK push sent — wait for M-Pesa callback
@@ -1772,6 +1779,325 @@ function logout(){
   localStorage.removeItem('eliteBinaryToken');
   window.location.href='/index.html';
 }
+</script>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     HIDDEN ADMIN PANEL — not linked from any public UI
+     Rendered only when the logged-in JWT carries role=admin
+     ═══════════════════════════════════════════════════════════════ -->
+<div class="sheet" id="admin-sheet" style="display:none">
+  <div class="sheet-knob"></div>
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+    <div style="width:36px;height:36px;background:linear-gradient(135deg,#e11d48,#7c3aed);border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:1rem">🛡️</div>
+    <div>
+      <div style="font-size:1rem;font-weight:800;color:var(--text)">Admin Panel</div>
+      <div style="font-size:.68rem;color:var(--text3)">Platform control — restricted access</div>
+    </div>
+    <div onclick="closeSheet('admin-sheet')" style="margin-left:auto;cursor:pointer;color:var(--text3);font-size:1.1rem">✕</div>
+  </div>
+
+  <!-- Platform Config -->
+  <div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:13px;margin-bottom:12px">
+    <div style="font-size:.65rem;font-weight:800;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px">⚙️ Platform Settings</div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <div style="font-size:.77rem;color:var(--text2)">Payout Rate</div>
+        <input id="adm-payout" type="number" step="0.01" min="0.01" max="10" value="0.90"
+          style="width:80px;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:5px 8px;font-size:.8rem;font-family:'JetBrains Mono',monospace;color:var(--text);text-align:right">
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <div style="font-size:.77rem;color:var(--text2)">Win Probability</div>
+        <input id="adm-winprob" type="number" step="0.01" min="0.01" max="0.99" value="0.50"
+          style="width:80px;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:5px 8px;font-size:.8rem;font-family:'JetBrains Mono',monospace;color:var(--text);text-align:right">
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <div style="font-size:.77rem;color:var(--text2)">Settlement Delay (ms)</div>
+        <input id="adm-delay" type="number" step="100" min="0" max="30000" value="900"
+          style="width:80px;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:5px 8px;font-size:.8rem;font-family:'JetBrains Mono',monospace;color:var(--text);text-align:right">
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <div style="font-size:.77rem;color:var(--text2)">Mock Payments</div>
+        <select id="adm-mock"
+          style="width:80px;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:5px 8px;font-size:.78rem;color:var(--text)">
+          <option value="true">ON</option>
+          <option value="false">OFF</option>
+        </select>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <div style="font-size:.77rem;color:var(--text2)">Designated Wallet</div>
+        <input id="adm-wallet" type="text" placeholder="Wallet info"
+          style="width:140px;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:5px 8px;font-size:.72rem;color:var(--text)">
+      </div>
+    </div>
+    <button onclick="admSaveConfig()"
+      style="width:100%;margin-top:10px;padding:10px;background:var(--blue);border-radius:8px;font-size:.82rem;font-weight:700;color:#fff;cursor:pointer">
+      Save Configuration
+    </button>
+    <div id="adm-cfg-msg" style="margin-top:6px;font-size:.72rem;font-weight:600;text-align:center;min-height:16px"></div>
+  </div>
+
+  <!-- Summary Stats -->
+  <div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:13px;margin-bottom:12px">
+    <div style="font-size:.65rem;font-weight:800;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px">📊 Platform Summary</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:9px;text-align:center">
+        <div style="font-size:.58rem;color:var(--text3);text-transform:uppercase;font-weight:700;margin-bottom:2px">Users</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:1.1rem;font-weight:800;color:var(--text)" id="adm-stat-users">—</div>
+      </div>
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:9px;text-align:center">
+        <div style="font-size:.58rem;color:var(--text3);text-transform:uppercase;font-weight:700;margin-bottom:2px">Trades</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:1.1rem;font-weight:800;color:var(--text)" id="adm-stat-trades">—</div>
+      </div>
+      <div style="background:var(--green-dim);border:1px solid rgba(34,197,94,.2);border-radius:8px;padding:9px;text-align:center">
+        <div style="font-size:.58rem;color:var(--green);text-transform:uppercase;font-weight:700;margin-bottom:2px">Deposits</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:1.1rem;font-weight:800;color:var(--green)" id="adm-stat-deps">—</div>
+      </div>
+      <div style="background:var(--red-dim);border:1px solid rgba(239,68,68,.2);border-radius:8px;padding:9px;text-align:center">
+        <div style="font-size:.58rem;color:var(--red);text-transform:uppercase;font-weight:700;margin-bottom:2px">Withdrawals</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:1.1rem;font-weight:800;color:var(--red)" id="adm-stat-wds">—</div>
+      </div>
+    </div>
+    <button onclick="admLoadSummary()"
+      style="width:100%;margin-top:10px;padding:9px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;font-size:.78rem;font-weight:700;color:var(--text2);cursor:pointer">
+      🔄 Refresh Summary
+    </button>
+  </div>
+
+  <!-- User Management -->
+  <div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:13px;margin-bottom:12px">
+    <div style="font-size:.65rem;font-weight:800;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px">👥 User Management</div>
+    <div style="display:flex;gap:6px;margin-bottom:8px">
+      <input id="adm-user-id" type="text" placeholder="User ID (usr_…)"
+        style="flex:1;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:8px 10px;font-size:.77rem;color:var(--text)">
+    </div>
+    <div style="display:flex;gap:6px;margin-bottom:6px">
+      <button onclick="admSuspendUser(true)"
+        style="flex:1;padding:9px;background:var(--red-dim);border:1px solid rgba(239,68,68,.35);border-radius:7px;font-size:.78rem;font-weight:700;color:var(--red);cursor:pointer">
+        Suspend
+      </button>
+      <button onclick="admSuspendUser(false)"
+        style="flex:1;padding:9px;background:var(--green-dim);border:1px solid rgba(34,197,94,.35);border-radius:7px;font-size:.78rem;font-weight:700;color:var(--green);cursor:pointer">
+        Unsuspend
+      </button>
+    </div>
+    <!-- Credit/Debit user balance -->
+    <div style="display:flex;gap:6px;margin-top:8px">
+      <input id="adm-credit-amt" type="number" placeholder="Amount (+ credit / − debit)"
+        style="flex:1;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:8px 10px;font-size:.77rem;color:var(--text)">
+      <button onclick="admCreditUser()"
+        style="padding:9px 14px;background:var(--blue-dim);border:1px solid rgba(27,110,245,.4);border-radius:7px;font-size:.78rem;font-weight:700;color:var(--blue);cursor:pointer">
+        Apply
+      </button>
+    </div>
+    <div id="adm-user-msg" style="margin-top:6px;font-size:.72rem;font-weight:600;text-align:center;min-height:16px"></div>
+  </div>
+
+  <!-- Pending Withdrawals -->
+  <div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:13px;margin-bottom:12px">
+    <div style="font-size:.65rem;font-weight:800;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px">⬆️ Withdrawal Approvals</div>
+    <div style="display:flex;gap:6px;margin-bottom:8px">
+      <input id="adm-wd-id" type="text" placeholder="Withdrawal ID (wd_…)"
+        style="flex:1;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:8px 10px;font-size:.77rem;color:var(--text)">
+    </div>
+    <div style="display:flex;gap:6px">
+      <button onclick="admApproveWd('approve')"
+        style="flex:1;padding:9px;background:var(--green-dim);border:1px solid rgba(34,197,94,.35);border-radius:7px;font-size:.78rem;font-weight:700;color:var(--green);cursor:pointer">
+        ✓ Approve
+      </button>
+      <button onclick="admApproveWd('reject')"
+        style="flex:1;padding:9px;background:var(--red-dim);border:1px solid rgba(239,68,68,.35);border-radius:7px;font-size:.78rem;font-weight:700;color:var(--red);cursor:pointer">
+        ✗ Reject
+      </button>
+    </div>
+    <div id="adm-wd-msg" style="margin-top:6px;font-size:.72rem;font-weight:600;text-align:center;min-height:16px"></div>
+  </div>
+
+  <!-- Pending Deposits -->
+  <div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:13px;margin-bottom:12px">
+    <div style="font-size:.65rem;font-weight:800;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px">⬇️ Deposit Approvals</div>
+    <div style="display:flex;gap:6px;margin-bottom:8px">
+      <input id="adm-dep-id" type="text" placeholder="Deposit ID (dep_…)"
+        style="flex:1;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:8px 10px;font-size:.77rem;color:var(--text)">
+    </div>
+    <button onclick="admApproveDeposit()"
+      style="width:100%;padding:9px;background:var(--green-dim);border:1px solid rgba(34,197,94,.35);border-radius:7px;font-size:.78rem;font-weight:700;color:var(--green);cursor:pointer">
+      ✓ Approve Deposit
+    </button>
+    <div id="adm-dep-msg" style="margin-top:6px;font-size:.72rem;font-weight:600;text-align:center;min-height:16px"></div>
+  </div>
+
+  <!-- Recent Users List -->
+  <div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:13px;margin-bottom:20px">
+    <div style="font-size:.65rem;font-weight:800;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px">🧑‍💼 Recent Users</div>
+    <div id="adm-users-list"><div class="empty-s"><div class="empty-i">👥</div>Load summary to view users</div></div>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════════
+// ADMIN PANEL — role-based, completely hidden from normal users
+// ══════════════════════════════════════════════════════════════
+const API_BASE = '';  // same origin
+
+function admToken() {
+  return localStorage.getItem('eliteBinaryToken') || currentToken || '';
+}
+
+function admHeaders() {
+  return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + admToken() };
+}
+
+// Called after login to check if the user is an admin, and reveal the hidden entry point
+async function checkAdminRole() {
+  try {
+    const res = await fetch(API_BASE + '/api/admin/me', { headers: admHeaders() });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.admin) {
+      // Reveal admin entry only inside the account sheet — no public link
+      document.getElementById('admin-sheet').style.display = '';
+      const adminBtn = document.getElementById('admin-acct-btn');
+      if (adminBtn) adminBtn.style.display = '';
+      console.log('[Admin] Admin session detected');
+    }
+  } catch (_) {}
+}
+
+async function admLoadSummary() {
+  const msg = (id, text, color) => {
+    const el = document.getElementById(id);
+    if (el) { el.textContent = text; el.style.color = color || 'var(--green)'; }
+  };
+  try {
+    const res = await fetch(API_BASE + '/api/admin/summary', { headers: admHeaders() });
+    if (!res.ok) { msg('adm-cfg-msg', '✗ ' + (await res.json()).error, 'var(--red)'); return; }
+    const d = await res.json();
+
+    // Populate stats
+    document.getElementById('adm-stat-users').textContent = (d.users || []).length;
+    document.getElementById('adm-stat-trades').textContent = (d.trades || []).length;
+    document.getElementById('adm-stat-deps').textContent = (d.deposits || []).length;
+    document.getElementById('adm-stat-wds').textContent = (d.withdrawals || []).length;
+
+    // Populate config inputs
+    if (d.config) {
+      document.getElementById('adm-payout').value = d.config.payoutRate ?? 0.9;
+      document.getElementById('adm-winprob').value = d.config.winProbability ?? 0.5;
+      document.getElementById('adm-delay').value = d.config.settlementDelayMs ?? 900;
+      document.getElementById('adm-mock').value = String(d.config.mockPayments ?? true);
+      document.getElementById('adm-wallet').value = d.config.designatedWallet ?? '';
+    }
+
+    // Render user list
+    const ul = document.getElementById('adm-users-list');
+    const users = (d.users || []).filter(u => u.role !== 'admin').slice(-20).reverse();
+    if (!users.length) {
+      ul.innerHTML = '<div class="empty-s"><div class="empty-i">👥</div>No users yet</div>';
+    } else {
+      ul.innerHTML = users.map(u => `
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)">
+          <div>
+            <div style="font-size:.78rem;font-weight:700;color:var(--text)">${u.name || u.identifier}</div>
+            <div style="font-size:.65rem;color:var(--text3)">${u.id} · ${u.demo ? 'Demo' : 'Real'} · ${u.suspended ? '🔴 Suspended' : '🟢 Active'}</div>
+          </div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:.82rem;font-weight:700;color:var(--amber)">$${(u.balance||0).toFixed(2)}</div>
+        </div>`).join('');
+    }
+    showToast('Admin', 'Summary loaded', 'ok');
+  } catch (e) {
+    showToast('Error', e.message, 'loss');
+  }
+}
+
+async function admSaveConfig() {
+  const msgEl = document.getElementById('adm-cfg-msg');
+  msgEl.textContent = 'Saving…'; msgEl.style.color = 'var(--text3)';
+  try {
+    const body = {
+      payoutRate: parseFloat(document.getElementById('adm-payout').value),
+      winProbability: parseFloat(document.getElementById('adm-winprob').value),
+      settlementDelayMs: parseInt(document.getElementById('adm-delay').value),
+      mockPayments: document.getElementById('adm-mock').value === 'true',
+      designatedWallet: document.getElementById('adm-wallet').value.trim()
+    };
+    const res = await fetch(API_BASE + '/api/admin/config', {
+      method: 'POST', headers: admHeaders(), body: JSON.stringify(body)
+    });
+    const d = await res.json();
+    if (!res.ok) { msgEl.textContent = '✗ ' + d.error; msgEl.style.color = 'var(--red)'; return; }
+    msgEl.textContent = '✓ Config saved'; msgEl.style.color = 'var(--green)';
+    showToast('Admin', 'Config updated', 'ok');
+  } catch (e) { msgEl.textContent = '✗ ' + e.message; msgEl.style.color = 'var(--red)'; }
+}
+
+async function admSuspendUser(suspend) {
+  const userId = document.getElementById('adm-user-id').value.trim();
+  const msgEl = document.getElementById('adm-user-msg');
+  if (!userId) { msgEl.textContent = '✗ Enter a user ID'; msgEl.style.color = 'var(--red)'; return; }
+  msgEl.textContent = 'Processing…'; msgEl.style.color = 'var(--text3)';
+  try {
+    const res = await fetch(API_BASE + '/api/admin/users/suspend', {
+      method: 'POST', headers: admHeaders(), body: JSON.stringify({ userId, suspended: suspend })
+    });
+    const d = await res.json();
+    if (!res.ok) { msgEl.textContent = '✗ ' + d.error; msgEl.style.color = 'var(--red)'; return; }
+    msgEl.textContent = suspend ? '✓ User suspended' : '✓ User unsuspended';
+    msgEl.style.color = 'var(--green)';
+  } catch (e) { msgEl.textContent = '✗ ' + e.message; msgEl.style.color = 'var(--red)'; }
+}
+
+async function admCreditUser() {
+  const userId = document.getElementById('adm-user-id').value.trim();
+  const amount = parseFloat(document.getElementById('adm-credit-amt').value);
+  const msgEl = document.getElementById('adm-user-msg');
+  if (!userId) { msgEl.textContent = '✗ Enter a user ID'; msgEl.style.color = 'var(--red)'; return; }
+  if (!amount || isNaN(amount)) { msgEl.textContent = '✗ Enter a valid amount'; msgEl.style.color = 'var(--red)'; return; }
+  msgEl.textContent = 'Processing…'; msgEl.style.color = 'var(--text3)';
+  try {
+    const res = await fetch(API_BASE + '/api/admin/users/credit', {
+      method: 'POST', headers: admHeaders(), body: JSON.stringify({ userId, amount })
+    });
+    const d = await res.json();
+    if (!res.ok) { msgEl.textContent = '✗ ' + d.error; msgEl.style.color = 'var(--red)'; return; }
+    msgEl.textContent = `✓ Balance updated → $${(d.user.balance||0).toFixed(2)}`;
+    msgEl.style.color = 'var(--green)';
+  } catch (e) { msgEl.textContent = '✗ ' + e.message; msgEl.style.color = 'var(--red)'; }
+}
+
+async function admApproveWd(action) {
+  const withdrawalId = document.getElementById('adm-wd-id').value.trim();
+  const msgEl = document.getElementById('adm-wd-msg');
+  if (!withdrawalId) { msgEl.textContent = '✗ Enter a withdrawal ID'; msgEl.style.color = 'var(--red)'; return; }
+  msgEl.textContent = 'Processing…'; msgEl.style.color = 'var(--text3)';
+  try {
+    const res = await fetch(API_BASE + '/api/admin/withdrawals/approve', {
+      method: 'POST', headers: admHeaders(), body: JSON.stringify({ withdrawalId, action })
+    });
+    const d = await res.json();
+    if (!res.ok) { msgEl.textContent = '✗ ' + d.error; msgEl.style.color = 'var(--red)'; return; }
+    msgEl.textContent = action === 'approve' ? '✓ Withdrawal approved' : '✓ Withdrawal rejected & refunded';
+    msgEl.style.color = action === 'approve' ? 'var(--green)' : 'var(--amber)';
+  } catch (e) { msgEl.textContent = '✗ ' + e.message; msgEl.style.color = 'var(--red)'; }
+}
+
+async function admApproveDeposit() {
+  const depositId = document.getElementById('adm-dep-id').value.trim();
+  const msgEl = document.getElementById('adm-dep-msg');
+  if (!depositId) { msgEl.textContent = '✗ Enter a deposit ID'; msgEl.style.color = 'var(--red)'; return; }
+  msgEl.textContent = 'Processing…'; msgEl.style.color = 'var(--text3)';
+  try {
+    const res = await fetch(API_BASE + '/api/admin/deposits/approve', {
+      method: 'POST', headers: admHeaders(), body: JSON.stringify({ depositId })
+    });
+    const d = await res.json();
+    if (!res.ok) { msgEl.textContent = '✗ ' + d.error; msgEl.style.color = 'var(--red)'; return; }
+    msgEl.textContent = '✓ Deposit approved & balance credited';
+    msgEl.style.color = 'var(--green)';
+  } catch (e) { msgEl.textContent = '✗ ' + e.message; msgEl.style.color = 'var(--red)'; }
+}
+
+// Run the admin check after the boot sequence completes
+setTimeout(checkAdminRole, 800);
 </script>
 </body>
 </html>
