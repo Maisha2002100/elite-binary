@@ -717,6 +717,8 @@ function doRegister(){
       id:genId(),name,email,phone,
       password:hashPw(pw),role:'user',
       balance:10000,
+      demo_balance:10000,   // virtual demo funds — always $10,000 to start
+      real_balance:0,       // real funds start at $0 until a deposit is made
       referral_code:genRef(),
       referred_by:referrerId,
       referrals:[],deposits:[],withdrawals:[],
