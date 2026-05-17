@@ -489,8 +489,9 @@ button,input,select{font-family:inherit;outline:none;border:none;background:none
   <div class="menu-row" onclick="openSheet('ref-sheet');closeSheet('menu-sheet')">🔗 My Referrals</div>
   <div class="menu-row" onclick="openSheet('dep-sheet');closeSheet('menu-sheet')">💳 Wallet</div>
   <div class="menu-row" onclick="setNav('acct');closeSheet('menu-sheet')">👤 Account</div>
+  <div class="menu-row" onclick="openSettingsSheet();closeSheet('menu-sheet')">⚙️ Settings</div>
   <!-- ADMIN SIDEBAR ENTRY — hidden from normal users, revealed by revealAdminUI() -->
-  <div id="menu-admin-row" class="menu-row" onclick="openSheet('admin-sheet');closeSheet('menu-sheet');admLoadSummary()"
+  <div id="menu-admin-row" class="menu-row" onclick="openAdminPanel();closeSheet('menu-sheet');"
     style="display:none;color:#e11d48;background:linear-gradient(135deg,rgba(225,29,72,.08),rgba(124,58,237,.08));border:1px solid rgba(225,29,72,.25);border-radius:9px;margin-top:4px;font-weight:800">
     🛡️ Admin Panel
   </div>
@@ -639,11 +640,12 @@ button,input,select{font-family:inherit;outline:none;border:none;background:none
     <div class="acct-stat"><div class="acst-lbl">Net P&L</div><div class="acst-val" id="ac-pnl">$0.00</div></div>
   </div>
   <div style="display:flex;flex-direction:column;gap:7px">
+    <button onclick="openSettingsSheet();closeSheet('acct-sheet')" style="padding:11px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;font-size:.84rem;font-weight:600;color:var(--text);cursor:pointer;text-align:left">⚙️ Account Settings</button>
     <button onclick="openSheet('ref-sheet');closeSheet('acct-sheet')" style="padding:11px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;font-size:.84rem;font-weight:600;color:var(--text);cursor:pointer;text-align:left">🔗 My Referrals</button>
     <button onclick="openSheet('dep-sheet');closeSheet('acct-sheet')" style="padding:11px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;font-size:.84rem;font-weight:600;color:var(--text);cursor:pointer;text-align:left">💳 Wallet & Transactions</button>
     <button onclick="dlApp()" style="padding:11px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;font-size:.84rem;font-weight:600;color:var(--blue);cursor:pointer;text-align:left">📱 Download App</button>
     <!-- ADMIN BUTTON — hidden from normal users; revealed only when role=admin is detected -->
-    <button id="admin-acct-btn" onclick="openSheet('admin-sheet');closeSheet('acct-sheet');admLoadSummary()" style="display:none;padding:11px;background:linear-gradient(135deg,rgba(225,29,72,.15),rgba(124,58,237,.15));border:1px solid rgba(225,29,72,.4);border-radius:8px;font-size:.84rem;font-weight:700;color:#e11d48;cursor:pointer;text-align:left">🛡️ Admin Panel</button>
+    <button id="admin-acct-btn" onclick="openAdminPanel();closeSheet('acct-sheet');" style="display:none;padding:11px;background:linear-gradient(135deg,rgba(225,29,72,.15),rgba(124,58,237,.15));border:1px solid rgba(225,29,72,.4);border-radius:8px;font-size:.84rem;font-weight:700;color:#e11d48;cursor:pointer;text-align:left">🛡️ Admin Panel</button>
     <button onclick="logout()" style="padding:11px;background:var(--red-dim);border:1px solid rgba(239,68,68,.3);border-radius:8px;font-size:.84rem;font-weight:700;color:var(--red);cursor:pointer">Logout</button>
   </div>
 </div>
@@ -818,8 +820,8 @@ const DEP_PH={mpesa:'e.g. 0712345678',card:'e.g. 4111 1111 1111 1111',bank:'e.g.
         const ddReal=document.getElementById('dd-real');
         if(ddReal) ddReal.textContent='$'+realBalance.toFixed(2);
       }).catch(()=>{});
-    // Check admin role after token is confirmed ready
-    checkAdminRole();
+    // Check admin role — deferred so second script block is fully parsed first
+    window.addEventListener('load', ()=>{ if(typeof checkAdminRole==='function') checkAdminRole(); });
   }
 
   setInterval(()=>{cfg=getConfig();renderExecBtns();},5000);
@@ -1838,157 +1840,526 @@ function logout(){
 }
 </script>
 
-<!-- ═══════════════════════════════════════════════════════════════
-     HIDDEN ADMIN PANEL — not linked from any public UI
-     Rendered only when the logged-in JWT carries role=admin
-     ═══════════════════════════════════════════════════════════════ -->
-<div class="sheet" id="admin-sheet" style="display:none">
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     SETTINGS SHEET — user account settings (hamburger menu)
+     ═══════════════════════════════════════════════════════════════════ -->
+<div class="sheet" id="settings-sheet">
   <div class="sheet-knob"></div>
-  <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
-    <div style="width:36px;height:36px;background:linear-gradient(135deg,#e11d48,#7c3aed);border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:1rem">🛡️</div>
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px">
+    <div style="width:36px;height:36px;background:var(--blue-dim);border:1px solid rgba(27,110,245,.4);border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:1.1rem">⚙️</div>
+    <div style="font-size:1rem;font-weight:800;color:var(--text)">Account Settings</div>
+    <div onclick="closeSheet('settings-sheet')" style="margin-left:auto;cursor:pointer;color:var(--text3);font-size:1.1rem">✕</div>
+  </div>
+
+  <!-- Profile card -->
+  <div style="background:linear-gradient(135deg,rgba(27,110,245,.12),rgba(124,58,237,.1));border:1px solid rgba(27,110,245,.3);border-radius:12px;padding:16px;margin-bottom:14px;display:flex;align-items:center;gap:14px">
+    <div id="sett-avatar" style="width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#e11d48,#7c3aed);display:flex;align-items:center;justify-content:center;font-size:1.4rem;font-weight:900;color:#fff;flex-shrink:0">?</div>
     <div>
-      <div style="font-size:1rem;font-weight:800;color:var(--text)">Admin Panel</div>
-      <div style="font-size:.68rem;color:var(--text3)">Platform control — restricted access</div>
+      <div style="font-size:.95rem;font-weight:800;color:var(--text)" id="sett-name">—</div>
+      <div style="font-size:.72rem;color:var(--text2)" id="sett-email">—</div>
+      <div style="margin-top:4px;display:flex;gap:6px">
+        <span style="font-size:.62rem;font-weight:700;background:var(--green-dim);color:var(--green);border-radius:4px;padding:2px 7px" id="sett-verified-badge">✓ Verified</span>
+        <span style="font-size:.62rem;font-weight:700;background:var(--blue-dim);color:var(--blue);border-radius:4px;padding:2px 7px" id="sett-role-badge">User</span>
+      </div>
     </div>
-    <div onclick="closeSheet('admin-sheet')" style="margin-left:auto;cursor:pointer;color:var(--text3);font-size:1.1rem">✕</div>
   </div>
 
-  <!-- Platform Config -->
-  <div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:13px;margin-bottom:12px">
-    <div style="font-size:.65rem;font-weight:800;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px">⚙️ Platform Settings</div>
-    <div style="display:flex;flex-direction:column;gap:8px">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-        <div style="font-size:.77rem;color:var(--text2)">Payout Rate</div>
-        <input id="adm-payout" type="number" step="0.01" min="0.01" max="10" value="0.90"
-          style="width:80px;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:5px 8px;font-size:.8rem;font-family:'JetBrains Mono',monospace;color:var(--text);text-align:right">
-      </div>
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-        <div style="font-size:.77rem;color:var(--text2)">Win Probability</div>
-        <input id="adm-winprob" type="number" step="0.01" min="0.01" max="0.99" value="0.50"
-          style="width:80px;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:5px 8px;font-size:.8rem;font-family:'JetBrains Mono',monospace;color:var(--text);text-align:right">
-      </div>
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-        <div style="font-size:.77rem;color:var(--text2)">Settlement Delay (ms)</div>
-        <input id="adm-delay" type="number" step="100" min="0" max="30000" value="900"
-          style="width:80px;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:5px 8px;font-size:.8rem;font-family:'JetBrains Mono',monospace;color:var(--text);text-align:right">
-      </div>
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-        <div style="font-size:.77rem;color:var(--text2)">Mock Payments</div>
-        <select id="adm-mock"
-          style="width:80px;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:5px 8px;font-size:.78rem;color:var(--text)">
-          <option value="true">ON</option>
-          <option value="false">OFF</option>
-        </select>
-      </div>
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-        <div style="font-size:.77rem;color:var(--text2)">Designated Wallet</div>
-        <input id="adm-wallet" type="text" placeholder="Wallet info"
-          style="width:140px;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:5px 8px;font-size:.72rem;color:var(--text)">
-      </div>
+  <!-- Account stats -->
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-bottom:14px">
+    <div style="background:var(--bg3);border:1px solid var(--border);border-radius:9px;padding:10px;text-align:center">
+      <div style="font-size:.58rem;color:var(--text3);text-transform:uppercase;font-weight:700;margin-bottom:3px">Trades</div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:1rem;font-weight:800;color:var(--text)" id="sett-trades">0</div>
     </div>
-    <button onclick="admSaveConfig()"
-      style="width:100%;margin-top:10px;padding:10px;background:var(--blue);border-radius:8px;font-size:.82rem;font-weight:700;color:#fff;cursor:pointer">
-      Save Configuration
+    <div style="background:var(--green-dim);border:1px solid rgba(34,197,94,.2);border-radius:9px;padding:10px;text-align:center">
+      <div style="font-size:.58rem;color:var(--green);text-transform:uppercase;font-weight:700;margin-bottom:3px">Win Rate</div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:1rem;font-weight:800;color:var(--green)" id="sett-wr">0%</div>
+    </div>
+    <div style="background:var(--amber-dim);border:1px solid rgba(245,158,11,.2);border-radius:9px;padding:10px;text-align:center">
+      <div style="font-size:.58rem;color:var(--amber);text-transform:uppercase;font-weight:700;margin-bottom:3px">Net P&L</div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:1rem;font-weight:800;color:var(--amber)" id="sett-pnl">$0</div>
+    </div>
+  </div>
+
+  <!-- Edit profile -->
+  <div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:13px;margin-bottom:12px">
+    <div style="font-size:.65rem;font-weight:800;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px">👤 Edit Profile</div>
+    <input id="sett-name-inp" type="text" placeholder="Display name"
+      style="width:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:8px;padding:10px 12px;font-size:.84rem;color:var(--text);margin-bottom:8px">
+    <input id="sett-phone-inp" type="tel" placeholder="Phone number (e.g. 0712345678)"
+      style="width:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:8px;padding:10px 12px;font-size:.84rem;color:var(--text);margin-bottom:8px">
+    <button onclick="settSaveProfile()"
+      style="width:100%;padding:11px;background:var(--blue);border-radius:8px;font-size:.84rem;font-weight:700;color:#fff;cursor:pointer">
+      Save Profile
     </button>
-    <div id="adm-cfg-msg" style="margin-top:6px;font-size:.72rem;font-weight:600;text-align:center;min-height:16px"></div>
+    <div id="sett-profile-msg" style="margin-top:6px;font-size:.72rem;font-weight:600;text-align:center;min-height:14px"></div>
   </div>
 
-  <!-- Summary Stats -->
+  <!-- Change password -->
   <div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:13px;margin-bottom:12px">
-    <div style="font-size:.65rem;font-weight:800;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px">📊 Platform Summary</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
-      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:9px;text-align:center">
-        <div style="font-size:.58rem;color:var(--text3);text-transform:uppercase;font-weight:700;margin-bottom:2px">Users</div>
-        <div style="font-family:'JetBrains Mono',monospace;font-size:1.1rem;font-weight:800;color:var(--text)" id="adm-stat-users">—</div>
-      </div>
-      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:9px;text-align:center">
-        <div style="font-size:.58rem;color:var(--text3);text-transform:uppercase;font-weight:700;margin-bottom:2px">Trades</div>
-        <div style="font-family:'JetBrains Mono',monospace;font-size:1.1rem;font-weight:800;color:var(--text)" id="adm-stat-trades">—</div>
-      </div>
-      <div style="background:var(--green-dim);border:1px solid rgba(34,197,94,.2);border-radius:8px;padding:9px;text-align:center">
-        <div style="font-size:.58rem;color:var(--green);text-transform:uppercase;font-weight:700;margin-bottom:2px">Deposits</div>
-        <div style="font-family:'JetBrains Mono',monospace;font-size:1.1rem;font-weight:800;color:var(--green)" id="adm-stat-deps">—</div>
-      </div>
-      <div style="background:var(--red-dim);border:1px solid rgba(239,68,68,.2);border-radius:8px;padding:9px;text-align:center">
-        <div style="font-size:.58rem;color:var(--red);text-transform:uppercase;font-weight:700;margin-bottom:2px">Withdrawals</div>
-        <div style="font-family:'JetBrains Mono',monospace;font-size:1.1rem;font-weight:800;color:var(--red)" id="adm-stat-wds">—</div>
-      </div>
-    </div>
-    <button onclick="admLoadSummary()"
-      style="width:100%;margin-top:10px;padding:9px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;font-size:.78rem;font-weight:700;color:var(--text2);cursor:pointer">
-      🔄 Refresh Summary
+    <div style="font-size:.65rem;font-weight:800;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px">🔑 Change Password</div>
+    <input id="sett-pw-cur" type="password" placeholder="Current password"
+      style="width:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:8px;padding:10px 12px;font-size:.84rem;color:var(--text);margin-bottom:8px">
+    <input id="sett-pw-new" type="password" placeholder="New password"
+      style="width:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:8px;padding:10px 12px;font-size:.84rem;color:var(--text);margin-bottom:8px">
+    <input id="sett-pw-conf" type="password" placeholder="Confirm new password"
+      style="width:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:8px;padding:10px 12px;font-size:.84rem;color:var(--text);margin-bottom:8px">
+    <button onclick="settChangePassword()"
+      style="width:100%;padding:11px;background:var(--bg2);border:1px solid var(--border2);border-radius:8px;font-size:.84rem;font-weight:700;color:var(--text);cursor:pointer">
+      Update Password
     </button>
+    <div id="sett-pw-msg" style="margin-top:6px;font-size:.72rem;font-weight:600;text-align:center;min-height:14px"></div>
   </div>
 
-  <!-- User Management -->
+  <!-- Preferences -->
   <div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:13px;margin-bottom:12px">
-    <div style="font-size:.65rem;font-weight:800;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px">👥 User Management</div>
-    <div style="display:flex;gap:6px;margin-bottom:8px">
-      <input id="adm-user-id" type="text" placeholder="User ID (usr_…)"
-        style="flex:1;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:8px 10px;font-size:.77rem;color:var(--text)">
+    <div style="font-size:.65rem;font-weight:800;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px">🎛️ Preferences</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--border)">
+      <div>
+        <div style="font-size:.8rem;font-weight:600;color:var(--text)">Sound Effects</div>
+        <div style="font-size:.68rem;color:var(--text3)">Play sounds on win/loss</div>
+      </div>
+      <div id="sett-sound-toggle" onclick="settToggle('sound')"
+        style="width:42px;height:24px;border-radius:12px;background:var(--green);cursor:pointer;position:relative;transition:.2s">
+        <div style="position:absolute;top:3px;right:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:.2s"></div>
+      </div>
     </div>
-    <div style="display:flex;gap:6px;margin-bottom:6px">
-      <button onclick="admSuspendUser(true)"
-        style="flex:1;padding:9px;background:var(--red-dim);border:1px solid rgba(239,68,68,.35);border-radius:7px;font-size:.78rem;font-weight:700;color:var(--red);cursor:pointer">
-        Suspend
-      </button>
-      <button onclick="admSuspendUser(false)"
-        style="flex:1;padding:9px;background:var(--green-dim);border:1px solid rgba(34,197,94,.35);border-radius:7px;font-size:.78rem;font-weight:700;color:var(--green);cursor:pointer">
-        Unsuspend
-      </button>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--border)">
+      <div>
+        <div style="font-size:.8rem;font-weight:600;color:var(--text)">Trade Confirmations</div>
+        <div style="font-size:.68rem;color:var(--text3)">Confirm before executing</div>
+      </div>
+      <div id="sett-confirm-toggle" onclick="settToggle('confirm')"
+        style="width:42px;height:24px;border-radius:12px;background:var(--border2);cursor:pointer;position:relative;transition:.2s">
+        <div style="position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:.2s"></div>
+      </div>
     </div>
-    <!-- Credit/Debit user balance -->
-    <div style="display:flex;gap:6px;margin-top:8px">
-      <input id="adm-credit-amt" type="number" placeholder="Amount (+ credit / − debit)"
-        style="flex:1;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:8px 10px;font-size:.77rem;color:var(--text)">
-      <button onclick="admCreditUser()"
-        style="padding:9px 14px;background:var(--blue-dim);border:1px solid rgba(27,110,245,.4);border-radius:7px;font-size:.78rem;font-weight:700;color:var(--blue);cursor:pointer">
-        Apply
-      </button>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:9px 0">
+      <div>
+        <div style="font-size:.8rem;font-weight:600;color:var(--text)">Auto-Switch to Real</div>
+        <div style="font-size:.68rem;color:var(--text3)">After deposit, switch to Real</div>
+      </div>
+      <div id="sett-autoreal-toggle" onclick="settToggle('autoreal')"
+        style="width:42px;height:24px;border-radius:12px;background:var(--green);cursor:pointer;position:relative;transition:.2s">
+        <div style="position:absolute;top:3px;right:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:.2s"></div>
+      </div>
     </div>
-    <div id="adm-user-msg" style="margin-top:6px;font-size:.72rem;font-weight:600;text-align:center;min-height:16px"></div>
   </div>
 
-  <!-- Pending Withdrawals -->
+  <!-- Notifications -->
   <div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:13px;margin-bottom:12px">
-    <div style="font-size:.65rem;font-weight:800;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px">⬆️ Withdrawal Approvals</div>
-    <div style="display:flex;gap:6px;margin-bottom:8px">
-      <input id="adm-wd-id" type="text" placeholder="Withdrawal ID (wd_…)"
-        style="flex:1;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:8px 10px;font-size:.77rem;color:var(--text)">
+    <div style="font-size:.65rem;font-weight:800;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px">🔔 Notifications</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)">
+      <div style="font-size:.8rem;font-weight:600;color:var(--text)">Deposit alerts</div>
+      <div id="sett-notif-dep-toggle" onclick="settToggle('notif_dep')"
+        style="width:42px;height:24px;border-radius:12px;background:var(--green);cursor:pointer;position:relative;transition:.2s">
+        <div style="position:absolute;top:3px;right:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:.2s"></div>
+      </div>
     </div>
-    <div style="display:flex;gap:6px">
-      <button onclick="admApproveWd('approve')"
-        style="flex:1;padding:9px;background:var(--green-dim);border:1px solid rgba(34,197,94,.35);border-radius:7px;font-size:.78rem;font-weight:700;color:var(--green);cursor:pointer">
-        ✓ Approve
-      </button>
-      <button onclick="admApproveWd('reject')"
-        style="flex:1;padding:9px;background:var(--red-dim);border:1px solid rgba(239,68,68,.35);border-radius:7px;font-size:.78rem;font-weight:700;color:var(--red);cursor:pointer">
-        ✗ Reject
-      </button>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)">
+      <div style="font-size:.8rem;font-weight:600;color:var(--text)">Trade result alerts</div>
+      <div id="sett-notif-trade-toggle" onclick="settToggle('notif_trade')"
+        style="width:42px;height:24px;border-radius:12px;background:var(--green);cursor:pointer;position:relative;transition:.2s">
+        <div style="position:absolute;top:3px;right:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:.2s"></div>
+      </div>
     </div>
-    <div id="adm-wd-msg" style="margin-top:6px;font-size:.72rem;font-weight:600;text-align:center;min-height:16px"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 0">
+      <div style="font-size:.8rem;font-weight:600;color:var(--text)">Promotional offers</div>
+      <div id="sett-notif-promo-toggle" onclick="settToggle('notif_promo')"
+        style="width:42px;height:24px;border-radius:12px;background:var(--border2);cursor:pointer;position:relative;transition:.2s">
+        <div style="position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:.2s"></div>
+      </div>
+    </div>
   </div>
 
-  <!-- Pending Deposits -->
+  <!-- Security -->
   <div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:13px;margin-bottom:12px">
-    <div style="font-size:.65rem;font-weight:800;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px">⬇️ Deposit Approvals</div>
-    <div style="display:flex;gap:6px;margin-bottom:8px">
-      <input id="adm-dep-id" type="text" placeholder="Deposit ID (dep_…)"
-        style="flex:1;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:8px 10px;font-size:.77rem;color:var(--text)">
+    <div style="font-size:.65rem;font-weight:800;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px">🔒 Security</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)">
+      <div>
+        <div style="font-size:.8rem;font-weight:600;color:var(--text)">Two-Factor Auth (2FA)</div>
+        <div style="font-size:.68rem;color:var(--text3)">Coming soon</div>
+      </div>
+      <span style="font-size:.68rem;font-weight:700;color:var(--text3);background:var(--bg2);border:1px solid var(--border);border-radius:5px;padding:3px 8px">Soon</span>
     </div>
-    <button onclick="admApproveDeposit()"
-      style="width:100%;padding:9px;background:var(--green-dim);border:1px solid rgba(34,197,94,.35);border-radius:7px;font-size:.78rem;font-weight:700;color:var(--green);cursor:pointer">
-      ✓ Approve Deposit
+    <div onclick="settResetDemo()" style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;cursor:pointer">
+      <div>
+        <div style="font-size:.8rem;font-weight:600;color:var(--amber)">Reset Demo Balance</div>
+        <div style="font-size:.68rem;color:var(--text3)">Restore demo to $10,000</div>
+      </div>
+      <span style="font-size:.9rem">↺</span>
+    </div>
+  </div>
+
+  <!-- Danger zone -->
+  <div style="background:var(--red-dim);border:1px solid rgba(239,68,68,.3);border-radius:10px;padding:13px;margin-bottom:20px">
+    <div style="font-size:.65rem;font-weight:800;color:var(--red);text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px">⚠️ Danger Zone</div>
+    <button onclick="settDeleteAccount()"
+      style="width:100%;padding:10px;background:transparent;border:1px solid rgba(239,68,68,.5);border-radius:8px;font-size:.82rem;font-weight:700;color:var(--red);cursor:pointer">
+      Delete My Account
     </button>
-    <div id="adm-dep-msg" style="margin-top:6px;font-size:.72rem;font-weight:600;text-align:center;min-height:16px"></div>
-  </div>
-
-  <!-- Recent Users List -->
-  <div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:13px;margin-bottom:20px">
-    <div style="font-size:.65rem;font-weight:800;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px">🧑‍💼 Recent Users</div>
-    <div id="adm-users-list"><div class="empty-s"><div class="empty-i">👥</div>Load summary to view users</div></div>
   </div>
 </div>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     FULL-SCREEN ADMIN PANEL — role-gated, hidden from normal users
+     ═══════════════════════════════════════════════════════════════════ -->
+<div id="admin-panel-overlay" style="display:none;position:fixed;inset:0;z-index:9999;background:#0a0e17;overflow-y:auto;max-width:480px;margin:0 auto">
+
+  <!-- Admin top bar -->
+  <div style="position:sticky;top:0;z-index:10;background:#0d1525;border-bottom:1px solid #1e2d45;padding:0">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div onclick="closeAdminPanel()" style="width:32px;height:32px;border-radius:8px;background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.3);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:.85rem">←</div>
+        <div>
+          <div style="font-size:.68rem;color:#e11d48;font-weight:800;text-transform:uppercase;letter-spacing:.1em">Elite Binary Admin</div>
+          <div style="font-size:.72rem;color:#7a8fb0" id="adm-welcome-name">Welcome, Admin</div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div style="width:8px;height:8px;border-radius:50%;background:#22c55e;box-shadow:0 0 8px #22c55e"></div>
+        <div style="font-size:.7rem;color:#22c55e;font-weight:700">LIVE</div>
+      </div>
+    </div>
+
+    <!-- Admin nav tabs -->
+    <div style="display:flex;overflow-x:auto;padding:0 12px 0;gap:4px;border-top:1px solid #1e2d45">
+      <div class="adm-tab on" id="atab-overview" onclick="admTab('overview')">📊 Overview</div>
+      <div class="adm-tab" id="atab-users" onclick="admTab('users')">👥 Users</div>
+      <div class="adm-tab" id="atab-deposits" onclick="admTab('deposits')">⬇️ Deposits</div>
+      <div class="adm-tab" id="atab-withdrawals" onclick="admTab('withdrawals')">⬆️ Withdrawals</div>
+      <div class="adm-tab" id="atab-trading" onclick="admTab('trading')">📈 Trading</div>
+      <div class="adm-tab" id="atab-security" onclick="admTab('security')">🔒 Security</div>
+      <div class="adm-tab" id="atab-config" onclick="admTab('config')">⚙️ Config</div>
+    </div>
+  </div>
+
+  <!-- ── TAB: OVERVIEW ── -->
+  <div id="apane-overview" class="adm-pane" style="padding:14px">
+    <!-- Stats grid -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:14px">
+      <div class="adm-card" style="grid-column:1/-1;background:linear-gradient(135deg,rgba(27,110,245,.2),rgba(124,58,237,.15));border-color:rgba(27,110,245,.4)">
+        <div style="font-size:.62rem;color:#7a8fb0;text-transform:uppercase;font-weight:700;letter-spacing:.06em">Daily Volume</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:1.6rem;font-weight:900;color:#fff;margin-top:2px" id="adm-ov-volume">$0.00</div>
+        <div style="font-size:.7rem;color:#22c55e;margin-top:2px" id="adm-ov-vol-trades">from 0 trades today</div>
+      </div>
+      <div class="adm-card">
+        <div style="font-size:.6rem;color:#7a8fb0;text-transform:uppercase;font-weight:700">Total Users</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:1.4rem;font-weight:900;color:#fff;margin-top:2px" id="adm-ov-users">0</div>
+        <div style="font-size:.65rem;color:#22c55e;margin-top:1px" id="adm-ov-active-users">0 active today</div>
+      </div>
+      <div class="adm-card">
+        <div style="font-size:.6rem;color:#7a8fb0;text-transform:uppercase;font-weight:700">Platform Profit</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:1.4rem;font-weight:900;color:#22c55e;margin-top:2px" id="adm-ov-profit">+$0.00</div>
+        <div style="font-size:.65rem;color:#7a8fb0;margin-top:1px" id="adm-ov-profit-rate">0% house edge</div>
+      </div>
+      <div class="adm-card">
+        <div style="font-size:.6rem;color:#7a8fb0;text-transform:uppercase;font-weight:700">Pending Deposits</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:1.4rem;font-weight:900;color:#f59e0b;margin-top:2px" id="adm-ov-pend-dep">0</div>
+        <div style="font-size:.65rem;color:#7a8fb0;margin-top:1px">awaiting approval</div>
+      </div>
+      <div class="adm-card">
+        <div style="font-size:.6rem;color:#7a8fb0;text-transform:uppercase;font-weight:700">Pending Withdrawals</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:1.4rem;font-weight:900;color:#ef4444;margin-top:2px" id="adm-ov-pend-wd">0</div>
+        <div style="font-size:.65rem;color:#7a8fb0;margin-top:1px">awaiting approval</div>
+      </div>
+      <div class="adm-card">
+        <div style="font-size:.6rem;color:#7a8fb0;text-transform:uppercase;font-weight:700">Active Trades</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:1.4rem;font-weight:900;color:#8b5cf6;margin-top:2px" id="adm-ov-active-trades">0</div>
+        <div style="font-size:.65rem;color:#7a8fb0;margin-top:1px">all time</div>
+      </div>
+    </div>
+
+    <!-- Quick market override -->
+    <div class="adm-section">
+      <div class="adm-section-title">⚡ Quick Market Override</div>
+      <div style="font-size:.74rem;color:#7a8fb0;margin-bottom:12px">Adjust live parameters for trading engine</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+        <div>
+          <div class="adm-lbl">Force Next Result</div>
+          <select id="adm-force-result" style="width:100%;background:#111827;border:1px solid #1e2d45;border-radius:7px;padding:9px 10px;font-size:.8rem;color:#e2e8f8">
+            <option value="random">Random (Fair Play)</option>
+            <option value="win">Force Win</option>
+            <option value="lose">Force Loss</option>
+          </select>
+        </div>
+        <div>
+          <div class="adm-lbl">Global Payout Multiplier</div>
+          <input id="adm-payout" type="number" step="0.01" min="0.1" max="10" value="0.90"
+            style="width:100%;background:#111827;border:1px solid #1e2d45;border-radius:7px;padding:9px 10px;font-size:.8rem;color:#e2e8f8;font-family:'JetBrains Mono',monospace">
+        </div>
+        <div>
+          <div class="adm-lbl">Min Stake ($)</div>
+          <input id="adm-minstake" type="number" step="0.5" min="0.1" value="1"
+            style="width:100%;background:#111827;border:1px solid #1e2d45;border-radius:7px;padding:9px 10px;font-size:.8rem;color:#e2e8f8;font-family:'JetBrains Mono',monospace">
+        </div>
+        <div>
+          <div class="adm-lbl">Max Stake ($)</div>
+          <input id="adm-maxstake" type="number" step="100" min="1" value="5000"
+            style="width:100%;background:#111827;border:1px solid #1e2d45;border-radius:7px;padding:9px 10px;font-size:.8rem;color:#e2e8f8;font-family:'JetBrains Mono',monospace">
+        </div>
+      </div>
+      <button onclick="admApplyMarketOverride()"
+        style="width:100%;padding:12px;background:linear-gradient(135deg,#1b6ef5,#7c3aed);border-radius:9px;font-size:.88rem;font-weight:800;color:#fff;cursor:pointer;letter-spacing:.02em">
+        ⚡ Apply Live Changes
+      </button>
+      <div id="adm-override-msg" style="margin-top:7px;font-size:.74rem;font-weight:600;text-align:center;min-height:16px"></div>
+    </div>
+
+    <!-- Recent user activity -->
+    <div class="adm-section">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div class="adm-section-title" style="margin-bottom:0">Recent User Activity</div>
+        <div onclick="admTab('users')" style="font-size:.72rem;color:#1b6ef5;font-weight:700;cursor:pointer">View all →</div>
+      </div>
+      <div id="adm-ov-activity"><div class="adm-empty">Loading…</div></div>
+    </div>
+  </div>
+
+  <!-- ── TAB: USERS ── -->
+  <div id="apane-users" class="adm-pane" style="display:none;padding:14px">
+    <div class="adm-section">
+      <div class="adm-section-title">🔍 Search Users</div>
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <input id="adm-user-search" type="text" placeholder="Name, email or ID…"
+          style="flex:1;background:#111827;border:1px solid #1e2d45;border-radius:8px;padding:10px 12px;font-size:.82rem;color:#e2e8f8"
+          oninput="admFilterUsers()">
+        <button onclick="admLoadSummary()" style="padding:10px 14px;background:#1b6ef5;border-radius:8px;font-size:.8rem;font-weight:700;color:#fff;cursor:pointer">↻</button>
+      </div>
+      <div id="adm-users-list"><div class="adm-empty">Tap ↻ to load users</div></div>
+    </div>
+
+    <!-- User action panel -->
+    <div class="adm-section">
+      <div class="adm-section-title">🛠️ User Actions</div>
+      <div class="adm-lbl">Selected User ID</div>
+      <input id="adm-user-id" type="text" placeholder="Tap a user above to select"
+        style="width:100%;background:#111827;border:1px solid #1e2d45;border-radius:8px;padding:10px 12px;font-size:.82rem;color:#e2e8f8;margin-bottom:10px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:10px">
+        <button onclick="admSuspendUser(true)"
+          style="padding:11px;background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);border-radius:8px;font-size:.8rem;font-weight:700;color:#ef4444;cursor:pointer">
+          🚫 Suspend
+        </button>
+        <button onclick="admSuspendUser(false)"
+          style="padding:11px;background:rgba(34,197,94,.15);border:1px solid rgba(34,197,94,.4);border-radius:8px;font-size:.8rem;font-weight:700;color:#22c55e;cursor:pointer">
+          ✓ Unsuspend
+        </button>
+      </div>
+      <div class="adm-lbl">Credit / Debit Balance</div>
+      <div style="display:flex;gap:7px;margin-bottom:8px">
+        <input id="adm-credit-amt" type="number" placeholder="Amount (+ credit / − debit)"
+          style="flex:1;background:#111827;border:1px solid #1e2d45;border-radius:8px;padding:10px 12px;font-size:.82rem;color:#e2e8f8">
+        <button onclick="admCreditUser()"
+          style="padding:10px 16px;background:#1b6ef5;border-radius:8px;font-size:.82rem;font-weight:700;color:#fff;cursor:pointer">Apply</button>
+      </div>
+      <div class="adm-lbl">KYC Verification</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px">
+        <button onclick="admSetKyc(true)"
+          style="padding:10px;background:rgba(27,110,245,.15);border:1px solid rgba(27,110,245,.4);border-radius:8px;font-size:.78rem;font-weight:700;color:#1b6ef5;cursor:pointer">
+          ✓ Verify KYC
+        </button>
+        <button onclick="admSetKyc(false)"
+          style="padding:10px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:8px;font-size:.78rem;font-weight:700;color:#ef4444;cursor:pointer">
+          ✗ Revoke KYC
+        </button>
+      </div>
+      <div id="adm-user-msg" style="margin-top:8px;font-size:.74rem;font-weight:600;text-align:center;min-height:16px"></div>
+    </div>
+  </div>
+
+  <!-- ── TAB: DEPOSITS ── -->
+  <div id="apane-deposits" class="adm-pane" style="display:none;padding:14px">
+    <div class="adm-section">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div class="adm-section-title" style="margin-bottom:0">⬇️ Deposit Requests</div>
+        <button onclick="admLoadSummary()" style="padding:7px 12px;background:#1e2d45;border-radius:7px;font-size:.75rem;font-weight:700;color:#7a8fb0;cursor:pointer">↻ Refresh</button>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px">
+        <div onclick="admFilterDep('all')" id="dep-flt-all" class="adm-flt on">All</div>
+        <div onclick="admFilterDep('pending')" id="dep-flt-pending" class="adm-flt">Pending</div>
+        <div onclick="admFilterDep('completed')" id="dep-flt-completed" class="adm-flt">Approved</div>
+      </div>
+      <div id="adm-deposits-list"><div class="adm-empty">Tap ↻ to load deposits</div></div>
+    </div>
+    <!-- Manual deposit approve -->
+    <div class="adm-section">
+      <div class="adm-section-title">✅ Approve Deposit</div>
+      <input id="adm-dep-id" type="text" placeholder="Deposit ID (dep_…)"
+        style="width:100%;background:#111827;border:1px solid #1e2d45;border-radius:8px;padding:10px 12px;font-size:.82rem;color:#e2e8f8;margin-bottom:8px">
+      <button onclick="admApproveDeposit()"
+        style="width:100%;padding:11px;background:rgba(34,197,94,.15);border:1px solid rgba(34,197,94,.4);border-radius:8px;font-size:.84rem;font-weight:700;color:#22c55e;cursor:pointer">
+        ✓ Approve & Credit User
+      </button>
+      <div id="adm-dep-msg" style="margin-top:7px;font-size:.74rem;font-weight:600;text-align:center;min-height:16px"></div>
+    </div>
+  </div>
+
+  <!-- ── TAB: WITHDRAWALS ── -->
+  <div id="apane-withdrawals" class="adm-pane" style="display:none;padding:14px">
+    <div class="adm-section">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div class="adm-section-title" style="margin-bottom:0">⬆️ Withdrawal Requests</div>
+        <button onclick="admLoadSummary()" style="padding:7px 12px;background:#1e2d45;border-radius:7px;font-size:.75rem;font-weight:700;color:#7a8fb0;cursor:pointer">↻ Refresh</button>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px">
+        <div onclick="admFilterWd('all')" id="wd-flt-all" class="adm-flt on">All</div>
+        <div onclick="admFilterWd('processing')" id="wd-flt-processing" class="adm-flt">Pending</div>
+        <div onclick="admFilterWd('paid')" id="wd-flt-paid" class="adm-flt">Paid</div>
+      </div>
+      <div id="adm-withdrawals-list"><div class="adm-empty">Tap ↻ to load withdrawals</div></div>
+    </div>
+    <!-- Manual withdrawal action -->
+    <div class="adm-section">
+      <div class="adm-section-title">🛠️ Approve / Reject</div>
+      <input id="adm-wd-id" type="text" placeholder="Withdrawal ID (wd_…)"
+        style="width:100%;background:#111827;border:1px solid #1e2d45;border-radius:8px;padding:10px 12px;font-size:.82rem;color:#e2e8f8;margin-bottom:8px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <button onclick="admApproveWd('approve')"
+          style="padding:11px;background:rgba(34,197,94,.15);border:1px solid rgba(34,197,94,.4);border-radius:8px;font-size:.82rem;font-weight:700;color:#22c55e;cursor:pointer">
+          ✓ Approve
+        </button>
+        <button onclick="admApproveWd('reject')"
+          style="padding:11px;background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);border-radius:8px;font-size:.82rem;font-weight:700;color:#ef4444;cursor:pointer">
+          ✗ Reject
+        </button>
+      </div>
+      <div id="adm-wd-msg" style="margin-top:7px;font-size:.74rem;font-weight:600;text-align:center;min-height:16px"></div>
+    </div>
+  </div>
+
+  <!-- ── TAB: TRADING ── -->
+  <div id="apane-trading" class="adm-pane" style="display:none;padding:14px">
+    <div class="adm-section">
+      <div class="adm-section-title">📈 Trading Engine Settings</div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div><div class="adm-lbl">Win Probability (0.01 – 0.99)</div>
+          <input id="adm-winprob" type="number" step="0.01" min="0.01" max="0.99" value="0.50"
+            style="width:100%;background:#111827;border:1px solid #1e2d45;border-radius:7px;padding:10px;font-size:.84rem;color:#e2e8f8;font-family:'JetBrains Mono',monospace"></div>
+        <div><div class="adm-lbl">Payout Rate (e.g. 0.90 = 90%)</div>
+          <input id="adm-payout2" type="number" step="0.01" min="0.01" max="10" value="0.90"
+            style="width:100%;background:#111827;border:1px solid #1e2d45;border-radius:7px;padding:10px;font-size:.84rem;color:#e2e8f8;font-family:'JetBrains Mono',monospace"></div>
+        <div><div class="adm-lbl">Settlement Delay (ms)</div>
+          <input id="adm-delay" type="number" step="100" min="0" max="30000" value="900"
+            style="width:100%;background:#111827;border:1px solid #1e2d45;border-radius:7px;padding:10px;font-size:.84rem;color:#e2e8f8;font-family:'JetBrains Mono',monospace"></div>
+        <div><div class="adm-lbl">Mock Payments</div>
+          <select id="adm-mock" style="width:100%;background:#111827;border:1px solid #1e2d45;border-radius:7px;padding:10px;font-size:.84rem;color:#e2e8f8">
+            <option value="true">ON (sandbox mode)</option>
+            <option value="false">OFF (live M-Pesa)</option>
+          </select></div>
+        <div><div class="adm-lbl">AI Bot Logic</div>
+          <select id="adm-bot-logic" style="width:100%;background:#111827;border:1px solid #1e2d45;border-radius:7px;padding:10px;font-size:.84rem;color:#e2e8f8">
+            <option value="fair">Fair Random</option>
+            <option value="house_edge">House Edge Favored</option>
+            <option value="user_edge">User Edge (promo)</option>
+          </select></div>
+      </div>
+      <button onclick="admSaveConfig()"
+        style="width:100%;margin-top:12px;padding:12px;background:linear-gradient(135deg,#1b6ef5,#7c3aed);border-radius:9px;font-size:.88rem;font-weight:800;color:#fff;cursor:pointer">
+        💾 Save Trading Settings
+      </button>
+      <div id="adm-cfg-msg" style="margin-top:7px;font-size:.74rem;font-weight:600;text-align:center;min-height:16px"></div>
+    </div>
+
+    <!-- Global trade history -->
+    <div class="adm-section">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div class="adm-section-title" style="margin-bottom:0">📋 Global Trade History</div>
+        <button onclick="admLoadSummary()" style="padding:7px 12px;background:#1e2d45;border-radius:7px;font-size:.75rem;color:#7a8fb0;cursor:pointer">↻</button>
+      </div>
+      <div id="adm-trades-list"><div class="adm-empty">Tap ↻ to load</div></div>
+    </div>
+  </div>
+
+  <!-- ── TAB: SECURITY ── -->
+  <div id="apane-security" class="adm-pane" style="display:none;padding:14px">
+    <div class="adm-section">
+      <div class="adm-section-title">🚨 Fraud Detection</div>
+      <div style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25);border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:.76rem;color:#f59e0b">
+        ⚠️ Accounts with suspicious activity are flagged automatically. Review and take action below.
+      </div>
+      <div id="adm-fraud-list"><div class="adm-empty">No flagged accounts</div></div>
+    </div>
+    <div class="adm-section">
+      <div class="adm-section-title">🚫 Banned IP List</div>
+      <div style="display:flex;gap:7px;margin-bottom:8px">
+        <input id="adm-ban-ip" type="text" placeholder="IP address to ban"
+          style="flex:1;background:#111827;border:1px solid #1e2d45;border-radius:8px;padding:10px;font-size:.82rem;color:#e2e8f8">
+        <button onclick="admBanIp()"
+          style="padding:10px 14px;background:rgba(239,68,68,.2);border:1px solid rgba(239,68,68,.4);border-radius:8px;font-size:.8rem;font-weight:700;color:#ef4444;cursor:pointer">Ban</button>
+      </div>
+      <div id="adm-banned-ips"><div class="adm-empty">No banned IPs</div></div>
+    </div>
+    <div class="adm-section">
+      <div class="adm-section-title">📋 Activity Logs</div>
+      <div id="adm-activity-log"><div class="adm-empty">Tap ↻ on Overview to populate</div></div>
+    </div>
+    <div class="adm-section">
+      <div class="adm-section-title">📢 Site Announcement</div>
+      <textarea id="adm-announcement" placeholder="Post a message to all users…"
+        style="width:100%;background:#111827;border:1px solid #1e2d45;border-radius:8px;padding:10px;font-size:.82rem;color:#e2e8f8;min-height:80px;resize:none;margin-bottom:8px"></textarea>
+      <button onclick="admPostAnnouncement()"
+        style="width:100%;padding:11px;background:rgba(27,110,245,.2);border:1px solid rgba(27,110,245,.4);border-radius:8px;font-size:.84rem;font-weight:700;color:#1b6ef5;cursor:pointer">
+        📢 Post Announcement
+      </button>
+      <div id="adm-ann-msg" style="margin-top:6px;font-size:.72rem;font-weight:600;text-align:center;min-height:14px"></div>
+    </div>
+  </div>
+
+  <!-- ── TAB: CONFIG ── -->
+  <div id="apane-config" class="adm-pane" style="display:none;padding:14px">
+    <div class="adm-section">
+      <div class="adm-section-title">🏦 Payment Config</div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div><div class="adm-lbl">Designated M-Pesa Wallet</div>
+          <input id="adm-wallet" type="text" placeholder="e.g. 254712345678"
+            style="width:100%;background:#111827;border:1px solid #1e2d45;border-radius:7px;padding:10px;font-size:.84rem;color:#e2e8f8"></div>
+        <div><div class="adm-lbl">Min Deposit ($)</div>
+          <input id="adm-mindep" type="number" min="1" value="10"
+            style="width:100%;background:#111827;border:1px solid #1e2d45;border-radius:7px;padding:10px;font-size:.84rem;color:#e2e8f8;font-family:'JetBrains Mono',monospace"></div>
+        <div><div class="adm-lbl">Min Withdrawal ($)</div>
+          <input id="adm-minwd" type="number" min="1" value="10"
+            style="width:100%;background:#111827;border:1px solid #1e2d45;border-radius:7px;padding:10px;font-size:.84rem;color:#e2e8f8;font-family:'JetBrains Mono',monospace"></div>
+        <div><div class="adm-lbl">Bonus on First Deposit (%)</div>
+          <input id="adm-bonus" type="number" min="0" max="200" value="0"
+            style="width:100%;background:#111827;border:1px solid #1e2d45;border-radius:7px;padding:10px;font-size:.84rem;color:#e2e8f8;font-family:'JetBrains Mono',monospace"></div>
+      </div>
+      <button onclick="admSaveFullConfig()"
+        style="width:100%;margin-top:12px;padding:12px;background:linear-gradient(135deg,#1b6ef5,#7c3aed);border-radius:9px;font-size:.88rem;font-weight:800;color:#fff;cursor:pointer">
+        💾 Save All Config
+      </button>
+      <div id="adm-fullcfg-msg" style="margin-top:7px;font-size:.74rem;font-weight:600;text-align:center;min-height:16px"></div>
+    </div>
+    <div class="adm-section" style="margin-bottom:20px">
+      <div class="adm-section-title">📱 App Version Control</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px;background:#111827;border:1px solid #1e2d45;border-radius:8px">
+          <div><div style="font-size:.8rem;font-weight:600;color:#e2e8f8">Current Version</div><div style="font-size:.7rem;color:#7a8fb0">v2.0.0</div></div>
+          <span style="font-size:.68rem;font-weight:700;background:rgba(34,197,94,.15);color:#22c55e;border-radius:5px;padding:3px 8px">LIVE</span>
+        </div>
+        <button onclick="showToast('App','Force update sent to all clients','ok')"
+          style="width:100%;padding:10px;background:rgba(245,158,11,.15);border:1px solid rgba(245,158,11,.3);border-radius:8px;font-size:.82rem;font-weight:700;color:#f59e0b;cursor:pointer">
+          📲 Force Client Refresh
+        </button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<style>
+.adm-tab{padding:9px 14px;font-size:.75rem;font-weight:700;color:#7a8fb0;cursor:pointer;white-space:nowrap;border-bottom:2px solid transparent;transition:.15s;flex-shrink:0}
+.adm-tab.on{color:#1b6ef5;border-bottom-color:#1b6ef5}
+.adm-pane{min-height:60vh}
+.adm-card{background:#111827;border:1px solid #1e2d45;border-radius:10px;padding:12px}
+.adm-section{background:#111827;border:1px solid #1e2d45;border-radius:11px;padding:14px;margin-bottom:12px}
+.adm-section-title{font-size:.78rem;font-weight:800;color:#e2e8f8;text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px}
+.adm-lbl{font-size:.68rem;font-weight:700;color:#7a8fb0;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px}
+.adm-empty{text-align:center;padding:20px;color:#3a506a;font-size:.8rem}
+.adm-flt{padding:7px 10px;background:#1a2235;border:1px solid #1e2d45;border-radius:7px;font-size:.74rem;font-weight:700;color:#7a8fb0;cursor:pointer;text-align:center;transition:.15s}
+.adm-flt.on{background:rgba(27,110,245,.15);border-color:rgba(27,110,245,.4);color:#1b6ef5}
+.adm-user-row{display:flex;align-items:center;justify-content:space-between;padding:10px 4px;border-bottom:1px solid #1e2d45;cursor:pointer}
+.adm-user-row:active{background:#1a2235}
+</style>
 
 <script>
 // ══════════════════════════════════════════════════════════════
@@ -2026,9 +2397,8 @@ function _promptAdminUnlock(){
   const pw=prompt('Admin Password:')||'';
   if(email===_ADM_EMAIL && pw===_ADM_PW){
     revealAdminUI();
+    openAdminPanel();
     showToast('Admin','Panel unlocked ✓','ok');
-    admLoadSummary();
-    openSheet('admin-sheet');
   } else {
     showToast('Access Denied','Invalid credentials','loss');
   }
@@ -2187,6 +2557,424 @@ async function admApproveDeposit(){
     msgEl.textContent='✓ Deposit approved & credited'; msgEl.style.color='var(--green)';
   }catch(e){ msgEl.textContent='✗ Server unavailable: run npm start'; msgEl.style.color='var(--red)'; }
 }
+
+// ══════════════════════════════════════════════════════════════
+// SETTINGS PANEL
+// ══════════════════════════════════════════════════════════════
+const SETT_KEY = 'eb_prefs';
+function getPrefs(){ try{ return JSON.parse(localStorage.getItem(SETT_KEY)||'{"sound":true,"confirm":false,"autoreal":true,"notif_dep":true,"notif_trade":true,"notif_promo":false}'); }catch(e){ return {}; } }
+function savePrefs(p){ localStorage.setItem(SETT_KEY, JSON.stringify(p)); }
+
+function openSettingsSheet(){
+  const user = currentUser || JSON.parse(localStorage.getItem('eliteBinaryUser')||'{}');
+  // Avatar letter
+  const nm = user.name||user.email||'?';
+  const av = document.getElementById('sett-avatar');
+  if(av) av.textContent = nm[0].toUpperCase();
+  // Fill fields
+  const el = id => document.getElementById(id);
+  if(el('sett-name')) el('sett-name').textContent = user.name||'—';
+  if(el('sett-email')) el('sett-email').textContent = user.email||user.identifier||'—';
+  if(el('sett-verified-badge')) el('sett-verified-badge').textContent = user.verified?'✓ Verified':'⚠ Unverified';
+  if(el('sett-role-badge')) el('sett-role-badge').textContent = (user.role==='admin'?'Admin':'User');
+  if(el('sett-name-inp')) el('sett-name-inp').value = user.name||'';
+  if(el('sett-phone-inp')) el('sett-phone-inp').value = user.phone||'';
+  // Stats
+  const trades = tradeHistory||[];
+  const wins = trades.filter(t=>t.won).length;
+  if(el('sett-trades')) el('sett-trades').textContent = trades.length;
+  if(el('sett-wr')) el('sett-wr').textContent = trades.length ? Math.round(wins/trades.length*100)+'%':'0%';
+  const pnl = trades.reduce((s,t)=>s+(t.profit||0),0);
+  if(el('sett-pnl')) el('sett-pnl').textContent = (pnl>=0?'+':'')+pnl.toFixed(2);
+  // Toggles
+  const prefs = getPrefs();
+  ['sound','confirm','autoreal','notif_dep','notif_trade','notif_promo'].forEach(k=>{ _applyToggle(k, prefs[k]!==false); });
+  openSheet('settings-sheet');
+}
+
+function settToggle(key){
+  const prefs = getPrefs();
+  prefs[key] = !prefs[key];
+  savePrefs(prefs);
+  _applyToggle(key, prefs[key]);
+}
+function _applyToggle(key, on){
+  const map = {sound:'sett-sound-toggle',confirm:'sett-confirm-toggle',autoreal:'sett-autoreal-toggle',notif_dep:'sett-notif-dep-toggle',notif_trade:'sett-notif-trade-toggle',notif_promo:'sett-notif-promo-toggle'};
+  const el = document.getElementById(map[key]);
+  if(!el) return;
+  const dot = el.querySelector('div');
+  if(on){
+    el.style.background='var(--green)';
+    if(dot){ dot.style.left=''; dot.style.right='3px'; }
+  } else {
+    el.style.background='var(--border2)';
+    if(dot){ dot.style.right=''; dot.style.left='3px'; }
+  }
+}
+
+function settSaveProfile(){
+  const msgEl = document.getElementById('sett-profile-msg');
+  const name = document.getElementById('sett-name-inp').value.trim();
+  const phone = document.getElementById('sett-phone-inp').value.trim();
+  if(!name){ msgEl.textContent='✗ Name cannot be empty'; msgEl.style.color='var(--red)'; return; }
+  const users = getDB();
+  const s = getSess();
+  if(!s){ msgEl.textContent='✗ Session error'; msgEl.style.color='var(--red)'; return; }
+  const u = users.find(u=>u.id===s.userId);
+  if(u){ u.name=name; if(phone) u.phone=phone; saveDB(users); currentUser=u; localStorage.setItem('eliteBinaryUser',JSON.stringify(u)); }
+  if(currentUser){ currentUser.name=name; if(phone) currentUser.phone=phone; }
+  updateAcctInfo();
+  document.getElementById('sett-name').textContent = name;
+  // Also try server
+  const token = admToken();
+  if(token) fetch('/api/user/profile',{method:'PATCH',headers:admHeaders(),body:JSON.stringify({name,phone})}).catch(()=>{});
+  msgEl.textContent='✓ Profile updated'; msgEl.style.color='var(--green)';
+  setTimeout(()=>{ msgEl.textContent=''; },3000);
+}
+
+function settChangePassword(){
+  const msgEl = document.getElementById('sett-pw-msg');
+  const cur = document.getElementById('sett-pw-cur').value;
+  const nw = document.getElementById('sett-pw-new').value;
+  const cf = document.getElementById('sett-pw-conf').value;
+  if(!cur||!nw||!cf){ msgEl.textContent='✗ Fill all fields'; msgEl.style.color='var(--red)'; return; }
+  if(nw!==cf){ msgEl.textContent='✗ New passwords do not match'; msgEl.style.color='var(--red)'; return; }
+  if(nw.length<6){ msgEl.textContent='✗ Password must be at least 6 characters'; msgEl.style.color='var(--red)'; return; }
+  // Try server
+  const token = admToken();
+  if(token){
+    fetch('/api/auth/change-password',{method:'POST',headers:admHeaders(),body:JSON.stringify({currentPassword:cur,newPassword:nw})})
+      .then(r=>r.json()).then(d=>{
+        if(d.ok||d.token){ msgEl.textContent='✓ Password changed'; msgEl.style.color='var(--green)'; ['sett-pw-cur','sett-pw-new','sett-pw-conf'].forEach(id=>{ document.getElementById(id).value=''; }); }
+        else { msgEl.textContent='✗ '+(d.error||'Wrong current password'); msgEl.style.color='var(--red)'; }
+      }).catch(()=>{
+        // Offline fallback: update local hash
+        _settChangePwLocal(cur,nw,msgEl);
+      });
+  } else { _settChangePwLocal(cur,nw,msgEl); }
+}
+function _settChangePwLocal(cur,nw,msgEl){
+  const users=getDB(); const s=getSess();
+  const u=s&&users.find(u=>u.id===s.userId);
+  if(!u){ msgEl.textContent='✗ Session error'; msgEl.style.color='var(--red)'; return; }
+  if(u.password!==hashPw(cur)){ msgEl.textContent='✗ Current password incorrect'; msgEl.style.color='var(--red)'; return; }
+  u.password=hashPw(nw); saveDB(users);
+  s.pwHash=u.password; saveSess(s);
+  msgEl.textContent='✓ Password updated locally'; msgEl.style.color='var(--green)';
+}
+
+function settResetDemo(){
+  if(!confirm('Reset demo balance to $10,000?')) return;
+  demoBalance=10000;
+  if(currentUser){ currentUser.demo_balance=10000; saveUserToDB(currentUser); }
+  if(accountMode==='demo'){ balance=10000; updateBalDisp(); }
+  showToast('Demo','Balance reset to $10,000','ok');
+}
+
+function settDeleteAccount(){
+  if(!confirm('Delete your account permanently? This cannot be undone.')) return;
+  if(!confirm('Are you absolutely sure? All data will be lost.')) return;
+  const users=getDB(); const s=getSess();
+  if(s){ const idx=users.findIndex(u=>u.id===s.userId); if(idx>=0) users.splice(idx,1); saveDB(users); }
+  localStorage.removeItem(DB_SESSION); localStorage.removeItem('eliteBinaryUser'); localStorage.removeItem('eliteBinaryToken');
+  window.location.href='/index.html';
+}
+
+// ══════════════════════════════════════════════════════════════
+// FULL-SCREEN ADMIN PANEL
+// ══════════════════════════════════════════════════════════════
+let _admData = { users:[], deposits:[], withdrawals:[], trades:[], config:{}, ledger:[] };
+let _admDepFilter='all', _admWdFilter='all';
+
+function openAdminPanel(){
+  const overlay = document.getElementById('admin-panel-overlay');
+  if(overlay){ overlay.style.display='block'; document.body.style.overflow='hidden'; }
+  const u = currentUser||{};
+  const wn = document.getElementById('adm-welcome-name');
+  if(wn) wn.textContent = 'Welcome, '+(u.name||'Admin');
+  admLoadSummary();
+}
+function closeAdminPanel(){
+  const overlay = document.getElementById('admin-panel-overlay');
+  if(overlay){ overlay.style.display='none'; document.body.style.overflow=''; }
+}
+
+function admTab(tab){
+  document.querySelectorAll('.adm-tab').forEach(t=>t.classList.remove('on'));
+  document.querySelectorAll('.adm-pane').forEach(p=>{ p.style.display='none'; });
+  const btn = document.getElementById('atab-'+tab);
+  const pane = document.getElementById('apane-'+tab);
+  if(btn) btn.classList.add('on');
+  if(pane) pane.style.display='';
+}
+
+async function admLoadSummary(){
+  try{
+    const res=await fetch('/api/admin/summary',{headers:admHeaders()});
+    if(res.ok){
+      const d=await res.json();
+      _admData = d;
+      _renderAdmOverview(d);
+      _renderAdmUsers(d.users||[]);
+      _renderAdmDeposits(d.deposits||[]);
+      _renderAdmWithdrawals(d.withdrawals||[]);
+      _renderAdmTrades(d.trades||[]);
+      _renderAdmConfig(d.config||{});
+      return;
+    }
+  }catch(_){}
+  // Offline fallback
+  const users=getDB();
+  const cfg=getConfig();
+  _admData={users,deposits:[],withdrawals:[],trades:[],config:cfg,ledger:[]};
+  _renderAdmOverview(_admData);
+  _renderAdmUsers(users);
+  _renderAdmConfig(cfg);
+  showToast('Admin','Loaded offline data','ok');
+}
+
+function _renderAdmOverview(d){
+  const trades=d.trades||[];
+  const deps=d.deposits||[];
+  const wds=d.withdrawals||[];
+  const users=d.users||[];
+  const volume=trades.reduce((s,t)=>s+(t.stake||0),0);
+  const profit=trades.reduce((s,t)=>s+(t.won?-(t.profit||0):(t.stake||0)),0);
+  const el=id=>document.getElementById(id);
+  if(el('adm-ov-volume')) el('adm-ov-volume').textContent='$'+volume.toFixed(2);
+  if(el('adm-ov-vol-trades')) el('adm-ov-vol-trades').textContent='from '+trades.length+' trades';
+  if(el('adm-ov-users')) el('adm-ov-users').textContent=users.length;
+  if(el('adm-ov-active-users')) el('adm-ov-active-users').textContent=users.filter(u=>!u.suspended).length+' active';
+  if(el('adm-ov-profit')) el('adm-ov-profit').textContent=(profit>=0?'+':'')+' $'+Math.abs(profit).toFixed(2);
+  const pendDep=deps.filter(d=>d.status==='pending'||d.status==='pending_stk').length;
+  const pendWd=wds.filter(w=>w.status==='processing').length;
+  if(el('adm-ov-pend-dep')) el('adm-ov-pend-dep').textContent=pendDep;
+  if(el('adm-ov-pend-wd')) el('adm-ov-pend-wd').textContent=pendWd;
+  if(el('adm-ov-active-trades')) el('adm-ov-active-trades').textContent=trades.length;
+  // Recent activity table
+  const act=el('adm-ov-activity');
+  if(!act) return;
+  const recent=users.slice(-8).reverse();
+  if(!recent.length){ act.innerHTML='<div class="adm-empty">No users yet</div>'; return; }
+  act.innerHTML=`
+    <div style="display:grid;grid-template-columns:2fr 2fr 1fr 1fr;gap:4px;margin-bottom:6px;padding:0 4px">
+      <div style="font-size:.6rem;color:#3a506a;font-weight:700;text-transform:uppercase">User ID</div>
+      <div style="font-size:.6rem;color:#3a506a;font-weight:700;text-transform:uppercase">Email</div>
+      <div style="font-size:.6rem;color:#3a506a;font-weight:700;text-transform:uppercase">Balance</div>
+      <div style="font-size:.6rem;color:#3a506a;font-weight:700;text-transform:uppercase">Status</div>
+    </div>`+
+    recent.map(u=>`
+    <div style="display:grid;grid-template-columns:2fr 2fr 1fr 1fr;gap:4px;padding:8px 4px;border-top:1px solid #1e2d45;align-items:center">
+      <div style="font-size:.68rem;color:#7a8fb0;font-family:'JetBrains Mono',monospace">#${(u.id||'').slice(-6)}</div>
+      <div style="font-size:.68rem;color:#e2e8f8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${u.email||u.identifier||'—'}</div>
+      <div style="font-size:.72rem;font-weight:700;color:#f59e0b;font-family:'JetBrains Mono',monospace">$${((u.balance||0)).toFixed(2)}</div>
+      <div style="font-size:.62rem;font-weight:700;color:${u.suspended?'#ef4444':'#22c55e'}">${u.suspended?'Block':'Active'}</div>
+    </div>`).join('');
+}
+
+function _renderAdmUsers(users){
+  const list=document.getElementById('adm-users-list');
+  if(!list) return;
+  const q=(document.getElementById('adm-user-search')||{}).value||'';
+  const filtered=(users||[]).filter(u=>u.role!=='admin').filter(u=>{
+    if(!q) return true;
+    const s=(u.name+' '+(u.email||u.identifier||'')+' '+(u.id||'')).toLowerCase();
+    return s.includes(q.toLowerCase());
+  }).slice(-50).reverse();
+  if(!filtered.length){ list.innerHTML='<div class="adm-empty">No users found</div>'; return; }
+  list.innerHTML=filtered.map(u=>`
+    <div class="adm-user-row" onclick="document.getElementById('adm-user-id').value='${u.id||u.userId||''}'">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:.8rem;font-weight:700;color:#e2e8f8">${u.name||'—'}</div>
+        <div style="font-size:.65rem;color:#7a8fb0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${u.email||u.identifier||''}</div>
+        <div style="font-size:.62rem;margin-top:2px;color:${u.suspended?'#ef4444':'#22c55e'}">${u.suspended?'🔴 Suspended':'🟢 Active'} · ${u.verified?'✓ KYC':'⚠ KYC'} · ${u.demo?'Demo':'Real'}</div>
+      </div>
+      <div style="text-align:right;flex-shrink:0;margin-left:8px">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:.85rem;font-weight:800;color:#f59e0b">$${((u.balance||0)).toFixed(2)}</div>
+        <div style="font-size:.6rem;color:#3a506a">${(u.id||'').slice(-8)}</div>
+      </div>
+    </div>`).join('');
+}
+
+function admFilterUsers(){ _renderAdmUsers(_admData.users||[]); }
+
+function _renderAdmDeposits(deps){
+  const list=document.getElementById('adm-deposits-list');
+  if(!list) return;
+  const f=_admDepFilter;
+  const filtered=(deps||[]).filter(d=>f==='all'||d.status===f||
+    (f==='pending'&&(d.status==='pending'||d.status==='pending_stk'))).slice(-30).reverse();
+  if(!filtered.length){ list.innerHTML='<div class="adm-empty">No deposits</div>'; return; }
+  list.innerHTML=filtered.map(d=>`
+    <div onclick="document.getElementById('adm-dep-id').value='${d.id||''}'"
+      style="padding:10px 4px;border-bottom:1px solid #1e2d45;cursor:pointer">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div style="font-size:.72rem;font-weight:700;color:#e2e8f8">$${(d.amount||0).toFixed(2)} M-Pesa</div>
+        <span style="font-size:.62rem;font-weight:700;padding:2px 7px;border-radius:4px;background:${d.status==='completed'?'rgba(34,197,94,.15)':d.status==='failed'?'rgba(239,68,68,.15)':'rgba(245,158,11,.15)'};color:${d.status==='completed'?'#22c55e':d.status==='failed'?'#ef4444':'#f59e0b'}">${d.status}</span>
+      </div>
+      <div style="font-size:.62rem;color:#7a8fb0;margin-top:2px">${d.id||''} · ${d.phone||d.destination||''} · ${(d.createdAt||'').slice(0,10)}</div>
+    </div>`).join('');
+}
+
+function admFilterDep(f){
+  _admDepFilter=f;
+  document.querySelectorAll('[id^="dep-flt-"]').forEach(el=>el.classList.remove('on'));
+  const btn=document.getElementById('dep-flt-'+f); if(btn) btn.classList.add('on');
+  _renderAdmDeposits(_admData.deposits||[]);
+}
+
+function _renderAdmWithdrawals(wds){
+  const list=document.getElementById('adm-withdrawals-list');
+  if(!list) return;
+  const f=_admWdFilter;
+  const filtered=(wds||[]).filter(w=>f==='all'||w.status===f).slice(-30).reverse();
+  if(!filtered.length){ list.innerHTML='<div class="adm-empty">No withdrawals</div>'; return; }
+  list.innerHTML=filtered.map(w=>`
+    <div onclick="document.getElementById('adm-wd-id').value='${w.id||''}'"
+      style="padding:10px 4px;border-bottom:1px solid #1e2d45;cursor:pointer">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div style="font-size:.72rem;font-weight:700;color:#e2e8f8">$${(w.amount||0).toFixed(2)}</div>
+        <span style="font-size:.62rem;font-weight:700;padding:2px 7px;border-radius:4px;background:${w.status==='paid'?'rgba(34,197,94,.15)':w.status==='failed'?'rgba(239,68,68,.15)':'rgba(245,158,11,.15)'};color:${w.status==='paid'?'#22c55e':w.status==='failed'?'#ef4444':'#f59e0b'}">${w.status}</span>
+      </div>
+      <div style="font-size:.62rem;color:#7a8fb0;margin-top:2px">${w.id||''} · ${w.destination||w.phone||''} · ${(w.createdAt||'').slice(0,10)}</div>
+    </div>`).join('');
+}
+
+function admFilterWd(f){
+  _admWdFilter=f;
+  document.querySelectorAll('[id^="wd-flt-"]').forEach(el=>el.classList.remove('on'));
+  const btn=document.getElementById('wd-flt-'+f); if(btn) btn.classList.add('on');
+  _renderAdmWithdrawals(_admData.withdrawals||[]);
+}
+
+function _renderAdmTrades(trades){
+  const list=document.getElementById('adm-trades-list');
+  if(!list) return;
+  const recent=(trades||[]).slice(-20).reverse();
+  if(!recent.length){ list.innerHTML='<div class="adm-empty">No trades recorded</div>'; return; }
+  list.innerHTML=recent.map(t=>`
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 4px;border-bottom:1px solid #1e2d45">
+      <div>
+        <div style="font-size:.74rem;font-weight:700;color:#e2e8f8">${t.contractType||t.type||'Trade'}</div>
+        <div style="font-size:.62rem;color:#7a8fb0">$${(t.stake||0).toFixed(2)} stake · ${(t.createdAt||'').slice(0,10)}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:.78rem;font-weight:800;color:${t.won?'#22c55e':'#ef4444'}">${t.won?'+$'+(t.profit||0).toFixed(2):'-$'+(t.stake||0).toFixed(2)}</div>
+        <div style="font-size:.6rem;color:${t.won?'#22c55e':'#ef4444'}">${t.won?'WIN':'LOSS'}</div>
+      </div>
+    </div>`).join('');
+}
+
+function _renderAdmConfig(cfg){
+  const el=id=>document.getElementById(id);
+  if(el('adm-winprob')) el('adm-winprob').value=cfg.winProbability??cfg.win_probability??0.5;
+  if(el('adm-payout2')) el('adm-payout2').value=cfg.payoutRate??cfg.payout_rate??0.9;
+  if(el('adm-payout')) el('adm-payout').value=cfg.payoutRate??cfg.payout_rate??0.9;
+  if(el('adm-delay')) el('adm-delay').value=cfg.settlementDelayMs??900;
+  if(el('adm-mock')) el('adm-mock').value=String(cfg.mockPayments??true);
+  if(el('adm-wallet')) el('adm-wallet').value=cfg.designatedWallet??cfg.wallet??'';
+  if(el('adm-minstake')) el('adm-minstake').value=cfg.min_stake??1;
+  if(el('adm-maxstake')) el('adm-maxstake').value=cfg.max_stake??5000;
+  if(el('adm-mindep')) el('adm-mindep').value=cfg.min_deposit??10;
+  if(el('adm-minwd')) el('adm-minwd').value=cfg.min_withdrawal??10;
+}
+
+async function admApplyMarketOverride(){
+  const msgEl=document.getElementById('adm-override-msg');
+  msgEl.textContent='Applying…'; msgEl.style.color='#7a8fb0';
+  const body={
+    payoutRate:parseFloat(document.getElementById('adm-payout').value),
+    minStake:parseFloat(document.getElementById('adm-minstake').value),
+    maxStake:parseFloat(document.getElementById('adm-maxstake').value),
+    forceResult:document.getElementById('adm-force-result').value
+  };
+  try{
+    const res=await fetch('/api/admin/config',{method:'POST',headers:admHeaders(),body:JSON.stringify(body)});
+    const d=await res.json();
+    if(!res.ok){ msgEl.textContent='✗ '+d.error; msgEl.style.color='#ef4444'; return; }
+    msgEl.textContent='✓ Live changes applied'; msgEl.style.color='#22c55e'; return;
+  }catch(_){}
+  const cfg=getConfig(); Object.assign(cfg,{payout_rate:body.payoutRate,min_stake:body.minStake,max_stake:body.maxStake}); localStorage.setItem(DB_CONFIG,JSON.stringify(cfg));
+  msgEl.textContent='✓ Applied locally (offline)'; msgEl.style.color='#22c55e';
+}
+
+async function admSaveConfig(){
+  const msgEl=document.getElementById('adm-cfg-msg');
+  msgEl.textContent='Saving…'; msgEl.style.color='#7a8fb0';
+  const body={
+    winProbability:parseFloat(document.getElementById('adm-winprob').value),
+    payoutRate:parseFloat(document.getElementById('adm-payout2').value),
+    settlementDelayMs:parseInt(document.getElementById('adm-delay').value),
+    mockPayments:document.getElementById('adm-mock').value==='true'
+  };
+  try{
+    const res=await fetch('/api/admin/config',{method:'POST',headers:admHeaders(),body:JSON.stringify(body)});
+    const d=await res.json();
+    if(!res.ok){ msgEl.textContent='✗ '+d.error; msgEl.style.color='#ef4444'; return; }
+    msgEl.textContent='✓ Trading settings saved'; msgEl.style.color='#22c55e'; showToast('Admin','Config updated','ok'); return;
+  }catch(_){}
+  const cfg=getConfig(); Object.assign(cfg,{win_probability:body.winProbability,payout_rate:body.payoutRate,mockPayments:body.mockPayments}); localStorage.setItem(DB_CONFIG,JSON.stringify(cfg));
+  msgEl.textContent='✓ Saved locally (offline)'; msgEl.style.color='#22c55e';
+}
+
+async function admSaveFullConfig(){
+  const msgEl=document.getElementById('adm-fullcfg-msg');
+  msgEl.textContent='Saving…'; msgEl.style.color='#7a8fb0';
+  const body={
+    designatedWallet:document.getElementById('adm-wallet').value.trim(),
+    minDeposit:parseFloat(document.getElementById('adm-mindep').value),
+    minWithdrawal:parseFloat(document.getElementById('adm-minwd').value),
+    firstDepositBonus:parseFloat(document.getElementById('adm-bonus').value)
+  };
+  try{
+    const res=await fetch('/api/admin/config',{method:'POST',headers:admHeaders(),body:JSON.stringify(body)});
+    const d=await res.json();
+    if(!res.ok){ msgEl.textContent='✗ '+d.error; msgEl.style.color='#ef4444'; return; }
+    msgEl.textContent='✓ Config saved'; msgEl.style.color='#22c55e'; showToast('Admin','Full config saved','ok'); return;
+  }catch(_){}
+  const cfg=getConfig(); Object.assign(cfg,{wallet:body.designatedWallet,min_deposit:body.minDeposit,min_withdrawal:body.minWithdrawal}); localStorage.setItem(DB_CONFIG,JSON.stringify(cfg));
+  msgEl.textContent='✓ Saved locally'; msgEl.style.color='#22c55e';
+}
+
+async function admSetKyc(verified){
+  const userId=document.getElementById('adm-user-id').value.trim();
+  const msgEl=document.getElementById('adm-user-msg');
+  if(!userId){ msgEl.textContent='✗ Select a user first'; msgEl.style.color='#ef4444'; return; }
+  try{
+    const res=await fetch('/api/admin/users/kyc',{method:'POST',headers:admHeaders(),body:JSON.stringify({userId,verified})});
+    const d=await res.json();
+    if(res.ok){ msgEl.textContent=verified?'✓ KYC Verified':'✓ KYC Revoked'; msgEl.style.color='#22c55e'; admLoadSummary(); return; }
+  }catch(_){}
+  const users=getDB(); const u=users.find(u=>u.id===userId);
+  if(u){ u.verified=verified; saveDB(users); msgEl.textContent=(verified?'✓ KYC Verified':'✓ KYC Revoked')+' (local)'; msgEl.style.color='#22c55e'; admLoadSummary(); }
+  else { msgEl.textContent='✗ User not found'; msgEl.style.color='#ef4444'; }
+}
+
+function admBanIp(){
+  const ip=document.getElementById('adm-ban-ip').value.trim();
+  if(!ip){ showToast('Error','Enter an IP address','loss'); return; }
+  const banned=JSON.parse(localStorage.getItem('eb_banned_ips')||'[]');
+  if(!banned.includes(ip)){ banned.push(ip); localStorage.setItem('eb_banned_ips',JSON.stringify(banned)); }
+  document.getElementById('adm-ban-ip').value='';
+  const list=document.getElementById('adm-banned-ips');
+  list.innerHTML=banned.map(b=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 4px;border-bottom:1px solid #1e2d45"><span style="font-family:'JetBrains Mono',monospace;font-size:.78rem;color:#ef4444">${b}</span><span onclick="admUnbanIp('${b}')" style="font-size:.7rem;color:#7a8fb0;cursor:pointer">Remove</span></div>`).join('');
+  showToast('Security','IP banned','ok');
+}
+function admUnbanIp(ip){
+  let banned=JSON.parse(localStorage.getItem('eb_banned_ips')||'[]');
+  banned=banned.filter(b=>b!==ip); localStorage.setItem('eb_banned_ips',JSON.stringify(banned));
+  admBanIp(); // re-render
+}
+
+function admPostAnnouncement(){
+  const msg=document.getElementById('adm-announcement').value.trim();
+  const msgEl=document.getElementById('adm-ann-msg');
+  if(!msg){ msgEl.textContent='✗ Enter a message'; msgEl.style.color='#ef4444'; return; }
+  localStorage.setItem('eb_announcement',JSON.stringify({msg,time:new Date().toISOString()}));
+  msgEl.textContent='✓ Announcement posted'; msgEl.style.color='#22c55e';
+  showToast('Admin','Announcement live','ok');
+}
+
 </script>
 </body>
 </html>
