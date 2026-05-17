@@ -814,7 +814,7 @@ async function routeApi(req, res) {
       if (!user) return send(res, 401, { error: 'Authentication required' });
 
       const amount = money(body.amount);
-      if (amount <= 0) return send(res, 400, { error: 'Deposit amount must be greater than zero' });
+      if (amount < 3.87) return send(res, 400, { error: 'Minimum deposit is $3.87 (KES 500)' });
       if (String(body.method || 'mpesa') === 'mpesa' && !String(body.phone || '').trim()) {
         return send(res, 400, { error: 'M-Pesa phone number is required' });
       }
@@ -997,7 +997,7 @@ async function routeApi(req, res) {
       if (!user) return send(res, 401, { error: 'Authentication required' });
 
       const amount = money(body.amount);
-      if (amount <= 0) return send(res, 400, { error: 'Withdrawal amount must be greater than zero' });
+      if (amount < 3.87) return send(res, 400, { error: 'Minimum withdrawal is $3.87 (KES 500)' });
       if (user.balance < amount) return send(res, 400, { error: 'Insufficient wallet balance' });
 
       user.balance = money(user.balance - amount);
