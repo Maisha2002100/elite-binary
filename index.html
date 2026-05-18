@@ -694,13 +694,25 @@ function doLogin(){
       showMsg((d&&d.error)||'Invalid email or password.','err');
       return;
     }
-    const token=genToken();
-    saveSess({userId:user.id,pwHash:user.password,token,
+    // User found locally but server rejected — try to register on server so we get a real JWT
+    const localToken=genToken();
+    saveSess({userId:user.id,pwHash:user.password,token:localToken,
       userName:user.name,userEmail:user.email||user.identifier,
       userRole:user.role||'user',expiry:Date.now()+30*24*60*60*1000});
     localStorage.setItem('eliteBinaryUser',JSON.stringify(user));
-    localStorage.setItem('eliteBinaryToken',token);
+    localStorage.setItem('eliteBinaryToken',localToken);
     showMsg('Welcome back, '+user.name+'! Redirecting…','ok');
+    // Try to get a real server JWT (user may exist on server with different password hash)
+    fetch('/api/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({identifier:user.email||user.identifier,name:user.name,password:pw,demo:!!user.demo})
+    }).then(async rr=>{
+      const dd=await rr.json().catch(()=>({}));
+      if(dd.token){
+        localStorage.setItem('eliteBinaryToken',dd.token);
+        const s=getSess()||{};
+        saveSess({...s,serverToken:dd.token,token:dd.token,userId:dd.user?.id||s.userId,pwHash:null});
+      }
+    }).catch(()=>{});
     setTimeout(()=>window.location.href='/dashboard.html',600);
 
   }).catch(()=>{
