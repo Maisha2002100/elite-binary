@@ -12,7 +12,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'change-this-jwt-secret-please';
 const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const OTP_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const PAYMENT_PROVIDER = (process.env.PAYMENT_PROVIDER || 'payhero').toLowerCase();
-const DEFAULT_MOCK_PAYMENTS = String(process.env.MOCK_PAYMENTS || 'true').toLowerCase() !== 'false';
+const DEFAULT_MOCK_PAYMENTS = String(process.env.MOCK_PAYMENTS || 'false').toLowerCase() !== 'false';
 const MPESA_ENV = (process.env.MPESA_ENV || 'sandbox').toLowerCase();
 const MPESA_HOST = MPESA_ENV === 'production' ? 'api.safaricom.co.ke' : 'sandbox.safaricom.co.ke';
 const PAYHERO_HOST = process.env.PAYHERO_HOST || 'backend.payhero.co.ke';
@@ -156,16 +156,11 @@ async function readDbFromSupabase() {
 
 async function writeDbToSupabase(db) {
   if (!hasSupabaseDb()) return;
-  try {
-    await supabaseRequest('POST', `/rest/v1/${encodeURIComponent(SUPABASE_DB_TABLE)}?on_conflict=id`, {
-      id: SUPABASE_DB_ID,
-      data: db,
-      updated_at: now()
-    });
-  } catch (e) {
-    console.error('[Supabase] Write failed:', e.message);
-    throw e; // re-throw so writeDb can fall back to file
-  }
+  await supabaseRequest('POST', `/rest/v1/${encodeURIComponent(SUPABASE_DB_TABLE)}?on_conflict=id`, {
+    id: SUPABASE_DB_ID,
+    data: db,
+    updated_at: now()
+  });
 }
 
 async function readDb() {
@@ -197,10 +192,9 @@ async function writeDb(db) {
   if (hasSupabaseDb()) {
     try {
       await writeDbToSupabase(db);
-      return; // Supabase write succeeded — done
+      return;
     } catch (e) {
       console.warn('[DB] Supabase write failed, falling back to file:', e.message);
-      // Fall through to file write as backup
     }
   }
   writeDbToFile(db);
@@ -424,7 +418,12 @@ function normalizePhone(phone) {
   const digits = String(phone || '').replace(/\D/g, '');
   if (digits.startsWith('254')) return digits;
   if (digits.startsWith('0')) return `254${digits.slice(1)}`;
+  if (digits.startsWith('7') || digits.startsWith('1')) return `254${digits}`;
   return digits;
+}
+
+function normalizePhonePlus(phone) {
+  return '+' + normalizePhone(phone);
 }
 
 async function initiateStkPush({ amount, phone, accountReference }) {
@@ -560,10 +559,9 @@ function parseBody(req) {
   });
 }
 
-// ── Seed the built-in admin account (never exposed publicly) ────────────
+// ── Seed admin account (never exposed publicly) ─────────────────────────
 const SEED_ADMIN_EMAIL = 'admin@elitebinary.com';
 const SEED_ADMIN_PASSWORD = '@elitebinary2002';
-const SEED_ADMIN_NAME = 'Platform Admin';
 
 async function ensureAdminAccount(db) {
   const existing = findUserByIdentifier(db, SEED_ADMIN_EMAIL);
@@ -571,7 +569,7 @@ async function ensureAdminAccount(db) {
     const admin = {
       id: id('usr'),
       identifier: SEED_ADMIN_EMAIL,
-      name: SEED_ADMIN_NAME,
+      name: 'Platform Admin',
       passwordHash: hashPassword(SEED_ADMIN_PASSWORD),
       balance: 0,
       demo: false,
@@ -582,40 +580,34 @@ async function ensureAdminAccount(db) {
     };
     db.users.push(admin);
     await writeDb(db);
-    console.log('[ADMIN] Seed admin account created');
+    console.log('[ADMIN] Seed admin account created:', SEED_ADMIN_EMAIL);
   } else if (existing.role !== 'admin') {
-    // Ensure role is correct if account existed before role field was added
     existing.role = 'admin';
     await writeDb(db);
-    console.log('[ADMIN] Seed admin account role corrected');
+    console.log('[ADMIN] Seed admin role corrected');
   }
 }
 
-// ── Admin guard: accepts X-Admin-Key header OR JWT with role=admin ───────
+function isAdminUser(user) {
+  return user && user.role === 'admin';
+}
+
 function requireAdmin(req, res, db) {
-  // Legacy key-based access (server-to-server / direct API use)
-  if (req.headers['x-admin-key'] && req.headers['x-admin-key'] === ADMIN_KEY) {
-    return true;
-  }
-  // Role-based JWT access (dashboard admin panel)
+  // Legacy key-based (server-to-server)
+  if (req.headers['x-admin-key'] === ADMIN_KEY) return true;
+  // JWT role=admin
   if (db) {
     const user = authenticate(req, db);
-    if (user && user.role === 'admin') return true;
+    if (isAdminUser(user)) return true;
   }
   send(res, 401, { error: 'Admin access required' });
   return false;
 }
 
-// New endpoint: verify the current JWT is an admin role (for frontend checks)
-function isAdminToken(req, db) {
-  const user = authenticate(req, db);
-  return user && user.role === 'admin';
-}
-
 function requireUser(req, res, db) {
   const user = authenticate(req, db);
   if (!user) {
-    send(res, 401, { error: 'Authentication required' });
+    send(res, 401, { error: 'Authentication required. Please log in again.' });
     return null;
   }
   return user;
@@ -661,7 +653,7 @@ async function routeApi(req, res) {
         demo,
         verified: false,
         suspended: false,
-        role: 'user',  // always 'user' — admin accounts are seeded only at startup
+        role: 'user',
         createdAt: now()
       };
       db.users.push(user);
@@ -772,24 +764,6 @@ async function routeApi(req, res) {
       return send(res, 200, { ok: true, verified: true });
     }
 
-    // ── Auth: change password (authenticated) ─────────────────────────
-    if (req.method === 'POST' && url.pathname === '/api/auth/change-password') {
-      const user = requireUser(req, res, db);
-      if (!user) return;
-      const body = await parseBody(req);
-      const currentPassword = String(body.currentPassword || '');
-      const newPassword = String(body.newPassword || '');
-      if (!currentPassword) return send(res, 400, { error: 'Current password is required' });
-      if (newPassword.length < 6) return send(res, 400, { error: 'New password must be at least 6 characters' });
-      if (user.passwordHash && !verifyPassword(currentPassword, user.passwordHash)) {
-        return send(res, 401, { error: 'Current password is incorrect' });
-      }
-      user.passwordHash = hashPassword(newPassword);
-      await writeDb(db);
-      const token = signToken({ userId: user.id });
-      return send(res, 200, { ok: true, token });
-    }
-
     // ── Auth: reset password (after OTP verify) ───────────────────────
     if (req.method === 'POST' && url.pathname === '/api/auth/reset-password') {
       const body = await parseBody(req);
@@ -841,26 +815,23 @@ async function routeApi(req, res) {
       if (!user && body.userId) user = findUser(db, body.userId);
       if (!user) return send(res, 401, { error: 'Authentication required. Please log in again.' });
 
-      // Accept amount in USD; also accept amountKes directly
-      const KES_RATE = 129; // KES per USD
-      let amountUsd = money(body.amount);
-      let amountKes = body.amountKes ? Math.round(Number(body.amountKes)) : Math.round(amountUsd * KES_RATE);
+      const KES_RATE = 129;
+      const amountUsd = money(body.amount);
+      const amountKes = body.amountKes
+        ? Math.round(Number(body.amountKes))
+        : Math.round(amountUsd * KES_RATE);
 
       if (amountUsd < 3.87) return send(res, 400, { error: 'Minimum deposit is $3.87 (KES 500)' });
-      if (amountKes < 500)  amountKes = Math.round(amountUsd * KES_RATE); // recompute if too low
+      if (amountKes < 500) return send(res, 400, { error: 'Minimum deposit is KES 500' });
 
       const rawPhone = String(body.phone || '').trim();
       if (!rawPhone) return send(res, 400, { error: 'M-Pesa phone number is required' });
 
-      // Normalize phone: 0712... → 254712..., already 254... stays, add + for PayHero
-      const digits = rawPhone.replace(/\D/g, '');
-      let phone254 = digits.startsWith('254') ? digits
-                   : digits.startsWith('0')   ? '254' + digits.slice(1)
-                   : '254' + digits;
-      if (phone254.length !== 12) {
+      const phone254 = normalizePhone(rawPhone);
+      if (!phone254.startsWith('254') || phone254.length !== 12) {
         return send(res, 400, { error: 'Invalid phone number. Use format: 0712345678' });
       }
-      const phoneWithPlus = '+' + phone254; // PayHero needs +254...
+      const phoneWithPlus = normalizePhonePlus(rawPhone); // +254... for PayHero
 
       const deposit = {
         id: id('dep'),
@@ -880,26 +851,26 @@ async function routeApi(req, res) {
         try {
           const stk = PAYMENT_PROVIDER === 'mpesa'
             ? await initiateStkPush({
-                amount: amountKes,        // ← KES to Daraja
+                amount: amountKes,         // KES to Daraja
                 phone: phone254,
                 accountReference: deposit.id
               })
             : await initiatePayheroStkPush({
-                amount: amountKes,        // ← KES to PayHero
-                phone: phoneWithPlus,     // ← +254... format
+                amount: amountKes,         // KES to PayHero
+                phone: phoneWithPlus,      // +254... for PayHero
                 accountReference: deposit.id,
                 customerName: user.name || user.identifier
               });
           deposit.providerReference = stk.CheckoutRequestID || stk.reference || stk.MerchantRequestID || id('stk');
           deposit.providerResponse = stk;
-          console.log(`[Deposit] STK sent to ${phone254} for KES ${amountKes} ($${amountUsd}) via ${PAYMENT_PROVIDER}`);
+          console.log(`[Deposit] STK sent → ${phone254} KES ${amountKes} ($${amountUsd}) via ${PAYMENT_PROVIDER}`);
         } catch (stkErr) {
           console.error('[Deposit] STK push failed:', stkErr.message);
           return send(res, 502, { error: 'STK push failed: ' + stkErr.message });
         }
       } else {
         deposit.providerReference = id('stk');
-        console.log(`[Deposit] Mock mode — skipping real STK. KES ${amountKes} ($${amountUsd}) credited to ${user.identifier}`);
+        console.log(`[Deposit] Mock — KES ${amountKes} ($${amountUsd}) credited to ${user.identifier}`);
       }
 
       db.deposits.push(deposit);
@@ -920,8 +891,8 @@ async function routeApi(req, res) {
         deposit,
         user: publicUser(user),
         message: db.config.mockPayments
-          ? `Mock: KES ${amountKes} ($${amountUsd}) credited immediately (mock mode on).`
-          : `STK push sent to ${phone254}. Enter your M-Pesa PIN to complete.`
+          ? `Mock: KES ${amountKes} ($${amountUsd}) credited (mock mode on).`
+          : `STK push sent to ${phone254}. Enter M-Pesa PIN to complete.`
       });
     }
 
@@ -1052,7 +1023,7 @@ async function routeApi(req, res) {
       if (!user) return send(res, 401, { error: 'Authentication required' });
 
       const amount = money(body.amount);
-      if (amount < 3.87) return send(res, 400, { error: 'Minimum withdrawal is $3.87 (KES 500)' });
+      if (amount <= 0) return send(res, 400, { error: 'Withdrawal amount must be greater than zero' });
       if (user.balance < amount) return send(res, 400, { error: 'Insufficient wallet balance' });
 
       user.balance = money(user.balance - amount);
@@ -1111,67 +1082,9 @@ async function routeApi(req, res) {
       return send(res, 200, { ok: true });
     }
 
-    // ── Admin: role check (used by frontend to detect admin session) ──
-    if (req.method === 'GET' && url.pathname === '/api/admin/me') {
-      const isAdmin = isAdminToken(req, db);
-      if (!isAdmin) return send(res, 403, { admin: false });
-      const user = authenticate(req, db);
-      return send(res, 200, { admin: true, user: publicUser(user) });
-    }
-
-    // ── Admin: manage user balance ────────────────────────────────────
-    if (req.method === 'POST' && url.pathname === '/api/admin/users/credit') {
-      if (!requireAdmin(req, res, db)) return;
-      const body = await parseBody(req);
-      const target = findUser(db, body.userId);
-      if (!target) return send(res, 404, { error: 'User not found' });
-      const amount = money(body.amount);
-      if (!Number.isFinite(amount)) return send(res, 400, { error: 'Invalid amount' });
-      target.balance = money(target.balance + amount);
-      ledger(db, {
-        userId: target.id,
-        type: 'admin_credit',
-        amount,
-        balanceAfter: target.balance,
-        reference: `admin_${now()}`
-      });
-      await writeDb(db);
-      return send(res, 200, { user: publicUser(target) });
-    }
-
-    // ── Admin: DB connection status ────────────────────────────────────
-    if (req.method === 'GET' && url.pathname === '/api/admin/db-status') {
-      if (!requireAdmin(req, res, db)) return;
-      const supabaseConfigured = hasSupabaseDb();
-      let supabaseReachable = false;
-      let supabaseError = null;
-      if (supabaseConfigured) {
-        try {
-          await readDbFromSupabase();
-          supabaseReachable = true;
-        } catch (e) {
-          supabaseError = e.message;
-        }
-      }
-      return send(res, 200, {
-        storage: supabaseConfigured ? (supabaseReachable ? 'supabase' : 'supabase_error') : 'file',
-        supabaseConfigured,
-        supabaseReachable,
-        supabaseError,
-        supabaseUrl: SUPABASE_URL ? SUPABASE_URL.replace(/https?:\/\//, '').split('.')[0] + '.supabase.co' : null,
-        supabaseTable: SUPABASE_DB_TABLE,
-        supabaseId: SUPABASE_DB_ID,
-        userCount: db.users.length,
-        tradeCount: db.trades.length,
-        depositCount: db.deposits.length,
-        withdrawalCount: db.withdrawals.length,
-        dbPath: supabaseConfigured ? null : DB_PATH
-      });
-    }
-
     // ── Admin ─────────────────────────────────────────────────────────
     if (req.method === 'GET' && url.pathname === '/api/admin/summary') {
-      if (!requireAdmin(req, res, db)) return;
+      if (!requireAdmin(req, res)) return;
       return send(res, 200, {
         config: db.config,
         users: db.users.map(publicUser),
@@ -1183,7 +1096,7 @@ async function routeApi(req, res) {
     }
 
     if (req.method === 'POST' && url.pathname === '/api/admin/config') {
-      if (!requireAdmin(req, res, db)) return;
+      if (!requireAdmin(req, res)) return;
       const body = await parseBody(req);
       if (body.payoutRate !== undefined) {
         db.config.payoutRate = Math.min(10, Math.max(0.01, Number(body.payoutRate)));
@@ -1205,7 +1118,7 @@ async function routeApi(req, res) {
     }
 
     if (req.method === 'POST' && url.pathname === '/api/admin/users/suspend') {
-      if (!requireAdmin(req, res, db)) return;
+      if (!requireAdmin(req, res)) return;
       const body = await parseBody(req);
       const user = findUser(db, body.userId);
       if (!user) return send(res, 404, { error: 'User not found' });
@@ -1214,19 +1127,8 @@ async function routeApi(req, res) {
       return send(res, 200, { user: publicUser(user) });
     }
 
-    if (req.method === 'POST' && url.pathname === '/api/admin/users/kyc') {
-      if (!requireAdmin(req, res, db)) return;
-      const body = await parseBody(req);
-      const user = findUser(db, body.userId);
-      if (!user) return send(res, 404, { error: 'User not found' });
-      user.verified = Boolean(body.verified ?? true);
-      user.kycUpdatedAt = now();
-      await writeDb(db);
-      return send(res, 200, { user: publicUser(user) });
-    }
-
     if (req.method === 'POST' && url.pathname === '/api/admin/withdrawals/approve') {
-      if (!requireAdmin(req, res, db)) return;
+      if (!requireAdmin(req, res)) return;
       const body = await parseBody(req);
       const wd = db.withdrawals.find((w) => w.id === body.withdrawalId);
       if (!wd) return send(res, 404, { error: 'Withdrawal not found' });
@@ -1252,7 +1154,7 @@ async function routeApi(req, res) {
     }
 
     if (req.method === 'POST' && url.pathname === '/api/admin/deposits/approve') {
-      if (!requireAdmin(req, res, db)) return;
+      if (!requireAdmin(req, res)) return;
       const body = await parseBody(req);
       const dep = db.deposits.find((d) => d.id === body.depositId);
       if (!dep) return send(res, 404, { error: 'Deposit not found' });
@@ -1272,6 +1174,76 @@ async function routeApi(req, res) {
       }
       await writeDb(db);
       return send(res, 200, { deposit: dep });
+    }
+
+    // ── Auth: change password (authenticated) ────────────────────────
+    if (req.method === 'POST' && url.pathname === '/api/auth/change-password') {
+      const user = requireUser(req, res, db);
+      if (!user) return;
+      const body = await parseBody(req);
+      const currentPassword = String(body.currentPassword || '');
+      const newPassword = String(body.newPassword || '');
+      if (!currentPassword) return send(res, 400, { error: 'Current password is required' });
+      if (newPassword.length < 6) return send(res, 400, { error: 'Password must be at least 6 characters' });
+      if (user.passwordHash && !verifyPassword(currentPassword, user.passwordHash)) {
+        return send(res, 401, { error: 'Current password is incorrect' });
+      }
+      user.passwordHash = hashPassword(newPassword);
+      await writeDb(db);
+      return send(res, 200, { ok: true, token: signToken({ userId: user.id }) });
+    }
+
+    // ── Admin: check role ─────────────────────────────────────────────
+    if (req.method === 'GET' && url.pathname === '/api/admin/me') {
+      const user = authenticate(req, db);
+      if (!user || !isAdminUser(user)) return send(res, 403, { admin: false });
+      return send(res, 200, { admin: true, user: publicUser(user) });
+    }
+
+    // ── Admin: DB connection status ───────────────────────────────────
+    if (req.method === 'GET' && url.pathname === '/api/admin/db-status') {
+      if (!requireAdmin(req, res, db)) return;
+      const supabaseConfigured = hasSupabaseDb();
+      let supabaseReachable = false;
+      let supabaseError = null;
+      if (supabaseConfigured) {
+        try { await readDbFromSupabase(); supabaseReachable = true; }
+        catch (e) { supabaseError = e.message; }
+      }
+      return send(res, 200, {
+        storage: supabaseConfigured ? (supabaseReachable ? 'supabase' : 'supabase_error') : 'file',
+        supabaseConfigured, supabaseReachable, supabaseError,
+        supabaseUrl: SUPABASE_URL || null,
+        supabaseTable: SUPABASE_DB_TABLE, supabaseId: SUPABASE_DB_ID,
+        userCount: db.users.length, tradeCount: db.trades.length,
+        depositCount: db.deposits.length, withdrawalCount: db.withdrawals.length
+      });
+    }
+
+    // ── Admin: credit/debit user balance ─────────────────────────────
+    if (req.method === 'POST' && url.pathname === '/api/admin/users/credit') {
+      if (!requireAdmin(req, res, db)) return;
+      const body = await parseBody(req);
+      const target = findUser(db, body.userId);
+      if (!target) return send(res, 404, { error: 'User not found' });
+      const amount = money(body.amount);
+      if (!Number.isFinite(amount)) return send(res, 400, { error: 'Invalid amount' });
+      target.balance = money(target.balance + amount);
+      ledger(db, { userId: target.id, type: 'admin_credit', amount, balanceAfter: target.balance, reference: `admin_${now()}` });
+      await writeDb(db);
+      return send(res, 200, { user: publicUser(target) });
+    }
+
+    // ── Admin: KYC verify/revoke ──────────────────────────────────────
+    if (req.method === 'POST' && url.pathname === '/api/admin/users/kyc') {
+      if (!requireAdmin(req, res, db)) return;
+      const body = await parseBody(req);
+      const target = findUser(db, body.userId);
+      if (!target) return send(res, 404, { error: 'User not found' });
+      target.verified = Boolean(body.verified ?? true);
+      target.kycUpdatedAt = now();
+      await writeDb(db);
+      return send(res, 200, { user: publicUser(target) });
     }
 
     return send(res, 404, { error: 'API route not found' });
@@ -1317,19 +1289,21 @@ const server = http.createServer((req, res) => {
 // Initialize in-memory database on startup
 initializeMemoryDb();
 
-// Seed the built-in admin account asynchronously after startup
+// Seed built-in admin account
 (async () => {
   try {
     const db = await readDb();
     await ensureAdminAccount(db);
   } catch (e) {
-    console.error('[ADMIN] Failed to seed admin account:', e.message);
+    console.error('[ADMIN] Failed to seed admin:', e.message);
   }
 })();
 
 server.listen(PORT, () => {
-  console.log(`Elite Binary backend running at http://localhost:${PORT}`);
-  console.log(`Admin key: ${ADMIN_KEY}`);
-  console.log(`Database mode: ${hasSupabaseDb() ? 'Supabase Postgres' : USE_FILE_DB ? 'File (with memory fallback)' : 'Memory only'}`);
-  console.log(`DB Path: ${hasSupabaseDb() ? `${SUPABASE_DB_TABLE}/${SUPABASE_DB_ID}` : DB_PATH}`);
+  console.log(`\n🚀 Elite Binary running at http://localhost:${PORT}`);
+  console.log(`🔑 Admin email:    admin@elitebinary.com`);
+  console.log(`🔑 Admin password: @elitebinary2002`);
+  console.log(`💾 Database: ${hasSupabaseDb() ? 'Supabase (' + SUPABASE_DB_TABLE + ')' : 'Local file (' + DB_PATH + ')'}`);
+  console.log(`💳 Payments: ${DEFAULT_MOCK_PAYMENTS ? 'MOCK MODE (no real STK)' : 'LIVE (' + PAYMENT_PROVIDER + ')'}`);
+  console.log(`📞 Provider: ${PAYMENT_PROVIDER}\n`);
 });
