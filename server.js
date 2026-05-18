@@ -128,7 +128,7 @@ function supabaseRequest(method, requestPath, payload) {
         Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
         'Content-Type': 'application/json',
         ...(raw ? { 'Content-Length': Buffer.byteLength(raw) } : {}),
-        ...(method === 'POST' ? { Prefer: 'resolution=merge-duplicates' } : {})
+        ...(method === 'POST' ? { Prefer: 'resolution=merge-duplicates,return=minimal' } : {})
       }
     }, (res) => {
       let data = '';
@@ -156,11 +156,16 @@ async function readDbFromSupabase() {
 
 async function writeDbToSupabase(db) {
   if (!hasSupabaseDb()) return;
-  await supabaseRequest('POST', `/rest/v1/${encodeURIComponent(SUPABASE_DB_TABLE)}?on_conflict=id`, {
-    id: SUPABASE_DB_ID,
-    data: db,
-    updated_at: now()
-  });
+  try {
+    await supabaseRequest('POST', `/rest/v1/${encodeURIComponent(SUPABASE_DB_TABLE)}?on_conflict=id`, {
+      id: SUPABASE_DB_ID,
+      data: db,
+      updated_at: now()
+    });
+  } catch (e) {
+    console.error('[Supabase] Write failed:', e.message);
+    throw e; // re-throw so writeDb can fall back to file
+  }
 }
 
 async function readDb() {
@@ -190,8 +195,13 @@ async function readDb() {
 async function writeDb(db) {
   memoryDb = JSON.parse(JSON.stringify(db));
   if (hasSupabaseDb()) {
-    await writeDbToSupabase(db);
-    return;
+    try {
+      await writeDbToSupabase(db);
+      return; // Supabase write succeeded — done
+    } catch (e) {
+      console.warn('[DB] Supabase write failed, falling back to file:', e.message);
+      // Fall through to file write as backup
+    }
   }
   writeDbToFile(db);
 }
@@ -762,6 +772,24 @@ async function routeApi(req, res) {
       return send(res, 200, { ok: true, verified: true });
     }
 
+    // ── Auth: change password (authenticated) ─────────────────────────
+    if (req.method === 'POST' && url.pathname === '/api/auth/change-password') {
+      const user = requireUser(req, res, db);
+      if (!user) return;
+      const body = await parseBody(req);
+      const currentPassword = String(body.currentPassword || '');
+      const newPassword = String(body.newPassword || '');
+      if (!currentPassword) return send(res, 400, { error: 'Current password is required' });
+      if (newPassword.length < 6) return send(res, 400, { error: 'New password must be at least 6 characters' });
+      if (user.passwordHash && !verifyPassword(currentPassword, user.passwordHash)) {
+        return send(res, 401, { error: 'Current password is incorrect' });
+      }
+      user.passwordHash = hashPassword(newPassword);
+      await writeDb(db);
+      const token = signToken({ userId: user.id });
+      return send(res, 200, { ok: true, token });
+    }
+
     // ── Auth: reset password (after OTP verify) ───────────────────────
     if (req.method === 'POST' && url.pathname === '/api/auth/reset-password') {
       const body = await parseBody(req);
@@ -811,20 +839,36 @@ async function routeApi(req, res) {
       const body = await parseBody(req);
       let user = authenticate(req, db);
       if (!user && body.userId) user = findUser(db, body.userId);
-      if (!user) return send(res, 401, { error: 'Authentication required' });
+      if (!user) return send(res, 401, { error: 'Authentication required. Please log in again.' });
 
-      const amount = money(body.amount);
-      if (amount < 3.87) return send(res, 400, { error: 'Minimum deposit is $3.87 (KES 500)' });
-      if (String(body.method || 'mpesa') === 'mpesa' && !String(body.phone || '').trim()) {
-        return send(res, 400, { error: 'M-Pesa phone number is required' });
+      // Accept amount in USD; also accept amountKes directly
+      const KES_RATE = 129; // KES per USD
+      let amountUsd = money(body.amount);
+      let amountKes = body.amountKes ? Math.round(Number(body.amountKes)) : Math.round(amountUsd * KES_RATE);
+
+      if (amountUsd < 3.87) return send(res, 400, { error: 'Minimum deposit is $3.87 (KES 500)' });
+      if (amountKes < 500)  amountKes = Math.round(amountUsd * KES_RATE); // recompute if too low
+
+      const rawPhone = String(body.phone || '').trim();
+      if (!rawPhone) return send(res, 400, { error: 'M-Pesa phone number is required' });
+
+      // Normalize phone: 0712... → 254712..., already 254... stays, add + for PayHero
+      const digits = rawPhone.replace(/\D/g, '');
+      let phone254 = digits.startsWith('254') ? digits
+                   : digits.startsWith('0')   ? '254' + digits.slice(1)
+                   : '254' + digits;
+      if (phone254.length !== 12) {
+        return send(res, 400, { error: 'Invalid phone number. Use format: 0712345678' });
       }
+      const phoneWithPlus = '+' + phone254; // PayHero needs +254...
 
       const deposit = {
         id: id('dep'),
         userId: user.id,
-        method: String(body.method || 'mpesa'),
-        phone: String(body.phone || '').trim(),
-        amount,
+        method: 'mpesa',
+        phone: phone254,
+        amount: amountUsd,
+        amountKes,
         status: db.config.mockPayments ? 'completed' : 'pending_stk',
         providerReference: null,
         paymentProvider: db.config.mockPayments ? 'mock' : PAYMENT_PROVIDER,
@@ -832,29 +876,40 @@ async function routeApi(req, res) {
         createdAt: now()
       };
 
-      if (!db.config.mockPayments && deposit.method === 'mpesa') {
-        const stk = PAYMENT_PROVIDER === 'mpesa'
-          ? await initiateStkPush({ amount, phone: deposit.phone, accountReference: deposit.id })
-          : await initiatePayheroStkPush({
-              amount,
-              phone: deposit.phone,
-              accountReference: deposit.id,
-              customerName: user.name || user.identifier
-            });
-        deposit.providerReference = stk.CheckoutRequestID || stk.reference || stk.MerchantRequestID || id('stk');
-        deposit.providerResponse = stk;
+      if (!db.config.mockPayments) {
+        try {
+          const stk = PAYMENT_PROVIDER === 'mpesa'
+            ? await initiateStkPush({
+                amount: amountKes,        // ← KES to Daraja
+                phone: phone254,
+                accountReference: deposit.id
+              })
+            : await initiatePayheroStkPush({
+                amount: amountKes,        // ← KES to PayHero
+                phone: phoneWithPlus,     // ← +254... format
+                accountReference: deposit.id,
+                customerName: user.name || user.identifier
+              });
+          deposit.providerReference = stk.CheckoutRequestID || stk.reference || stk.MerchantRequestID || id('stk');
+          deposit.providerResponse = stk;
+          console.log(`[Deposit] STK sent to ${phone254} for KES ${amountKes} ($${amountUsd}) via ${PAYMENT_PROVIDER}`);
+        } catch (stkErr) {
+          console.error('[Deposit] STK push failed:', stkErr.message);
+          return send(res, 502, { error: 'STK push failed: ' + stkErr.message });
+        }
       } else {
         deposit.providerReference = id('stk');
+        console.log(`[Deposit] Mock mode — skipping real STK. KES ${amountKes} ($${amountUsd}) credited to ${user.identifier}`);
       }
 
       db.deposits.push(deposit);
 
       if (deposit.status === 'completed') {
-        user.balance = money(user.balance + amount);
+        user.balance = money(user.balance + amountUsd);
         ledger(db, {
           userId: user.id,
           type: 'deposit',
-          amount,
+          amount: amountUsd,
           balanceAfter: user.balance,
           reference: deposit.id
         });
@@ -865,8 +920,8 @@ async function routeApi(req, res) {
         deposit,
         user: publicUser(user),
         message: db.config.mockPayments
-          ? 'Mock STK push completed and wallet credited.'
-          : 'STK push initiated. Credit wallet from the provider callback.'
+          ? `Mock: KES ${amountKes} ($${amountUsd}) credited immediately (mock mode on).`
+          : `STK push sent to ${phone254}. Enter your M-Pesa PIN to complete.`
       });
     }
 
@@ -1084,6 +1139,36 @@ async function routeApi(req, res) {
       return send(res, 200, { user: publicUser(target) });
     }
 
+    // ── Admin: DB connection status ────────────────────────────────────
+    if (req.method === 'GET' && url.pathname === '/api/admin/db-status') {
+      if (!requireAdmin(req, res, db)) return;
+      const supabaseConfigured = hasSupabaseDb();
+      let supabaseReachable = false;
+      let supabaseError = null;
+      if (supabaseConfigured) {
+        try {
+          await readDbFromSupabase();
+          supabaseReachable = true;
+        } catch (e) {
+          supabaseError = e.message;
+        }
+      }
+      return send(res, 200, {
+        storage: supabaseConfigured ? (supabaseReachable ? 'supabase' : 'supabase_error') : 'file',
+        supabaseConfigured,
+        supabaseReachable,
+        supabaseError,
+        supabaseUrl: SUPABASE_URL ? SUPABASE_URL.replace(/https?:\/\//, '').split('.')[0] + '.supabase.co' : null,
+        supabaseTable: SUPABASE_DB_TABLE,
+        supabaseId: SUPABASE_DB_ID,
+        userCount: db.users.length,
+        tradeCount: db.trades.length,
+        depositCount: db.deposits.length,
+        withdrawalCount: db.withdrawals.length,
+        dbPath: supabaseConfigured ? null : DB_PATH
+      });
+    }
+
     // ── Admin ─────────────────────────────────────────────────────────
     if (req.method === 'GET' && url.pathname === '/api/admin/summary') {
       if (!requireAdmin(req, res, db)) return;
@@ -1125,6 +1210,17 @@ async function routeApi(req, res) {
       const user = findUser(db, body.userId);
       if (!user) return send(res, 404, { error: 'User not found' });
       user.suspended = Boolean(body.suspended ?? true);
+      await writeDb(db);
+      return send(res, 200, { user: publicUser(user) });
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/admin/users/kyc') {
+      if (!requireAdmin(req, res, db)) return;
+      const body = await parseBody(req);
+      const user = findUser(db, body.userId);
+      if (!user) return send(res, 404, { error: 'User not found' });
+      user.verified = Boolean(body.verified ?? true);
+      user.kycUpdatedAt = now();
       await writeDb(db);
       return send(res, 200, { user: publicUser(user) });
     }
