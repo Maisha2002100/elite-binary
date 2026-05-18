@@ -2780,8 +2780,27 @@ async function admApproveDeposit(){
     const res=await fetch('/api/admin/deposits/approve',{method:'POST',headers:admHeaders(),body:JSON.stringify({depositId})});
     const d=await res.json();
     if(!res.ok){ msgEl.textContent='✗ '+d.error; msgEl.style.color='var(--red)'; return; }
-    msgEl.textContent='✓ Deposit approved & credited'; msgEl.style.color='var(--green)';
+    msgEl.textContent='✓ Deposit approved & credited'; msgEl.style.color='var(--green)'; setTimeout(()=>admLoadSummary(),800);
   }catch(e){ msgEl.textContent='✗ Server unavailable: run npm start'; msgEl.style.color='var(--red)'; }
+
+// One-tap approve directly from the deposit card
+async function admQuickApproveDeposit(depositId){
+  const msgEl=document.getElementById("qdep-msg-"+depositId);
+  if(msgEl){ msgEl.textContent="Processingu2026"; msgEl.style.color="var(--text3)"; }
+  try{
+    const res=await fetch("/api/admin/deposits/approve",{method:"POST",headers:admHeaders(),body:JSON.stringify({depositId})});
+    const d=await res.json();
+    if(!res.ok){
+      if(msgEl){ msgEl.textContent="u2717 "+(d.error||"Failed"); msgEl.style.color="var(--red)"; }
+      return;
+    }
+    if(msgEl){ msgEl.textContent="u2713 Approved & credited!"; msgEl.style.color="var(--green)"; }
+    showToast("Deposit Approved","Balance credited to user","ok");
+    setTimeout(()=>admLoadSummary(),1000);
+  }catch(e){
+    if(msgEl){ msgEl.textContent="u2717 Server error"; msgEl.style.color="var(--red)"; }
+  }
+}
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -2932,6 +2951,8 @@ function admTab(tab){
   const pane = document.getElementById('apane-'+tab);
   if(btn) btn.classList.add('on');
   if(pane) pane.style.display='';
+  // Auto-load data when switching to deposits or withdrawals
+  if(tab==='deposits'||tab==='withdrawals'||tab==='overview') admLoadSummary();
 }
 
 async function admLoadSummary(){
@@ -3031,15 +3052,25 @@ function _renderAdmDeposits(deps){
   const filtered=(deps||[]).filter(d=>f==='all'||d.status===f||
     (f==='pending'&&(d.status==='pending'||d.status==='pending_stk'))).slice(-30).reverse();
   if(!filtered.length){ list.innerHTML='<div class="adm-empty">No deposits</div>'; return; }
-  list.innerHTML=filtered.map(d=>`
-    <div onclick="document.getElementById('adm-dep-id').value='${d.id||''}'"
-      style="padding:10px 4px;border-bottom:1px solid #1e2d45;cursor:pointer">
+  list.innerHTML=filtered.map(d=>{
+    const isPending = d.status==='pending'||d.status==='pending_stk'||d.status==='failed';
+    const approveBtn = isPending
+      ? `<button onclick="event.stopPropagation();admQuickApproveDeposit('${d.id||''}')"
+           style="margin-top:7px;width:100%;padding:8px;background:rgba(34,197,94,.18);border:1px solid rgba(34,197,94,.45);border-radius:7px;font-size:.78rem;font-weight:800;color:#22c55e;cursor:pointer">
+           ✓ Approve & Credit User
+         </button>`
+      : '';
+    return `
+    <div style="padding:10px 4px;border-bottom:1px solid #1e2d45">
       <div style="display:flex;align-items:center;justify-content:space-between">
-        <div style="font-size:.72rem;font-weight:700;color:#e2e8f8">$${(d.amount||0).toFixed(2)} M-Pesa</div>
+        <div style="font-size:.72rem;font-weight:700;color:#e2e8f8">$${(d.amount||0).toFixed(2)} · KES ${d.amountKes||Math.round((d.amount||0)*129)} M-Pesa</div>
         <span style="font-size:.62rem;font-weight:700;padding:2px 7px;border-radius:4px;background:${d.status==='completed'?'rgba(34,197,94,.15)':d.status==='failed'?'rgba(239,68,68,.15)':'rgba(245,158,11,.15)'};color:${d.status==='completed'?'#22c55e':d.status==='failed'?'#ef4444':'#f59e0b'}">${d.status}</span>
       </div>
       <div style="font-size:.62rem;color:#7a8fb0;margin-top:2px">${d.id||''} · ${d.phone||d.destination||''} · ${(d.createdAt||'').slice(0,10)}</div>
-    </div>`).join('');
+      ${approveBtn}
+      <div id="qdep-msg-${d.id||''}" style="font-size:.72rem;font-weight:700;text-align:center;min-height:14px;margin-top:3px"></div>
+    </div>`;
+  }).join('');
 }
 
 function admFilterDep(f){
