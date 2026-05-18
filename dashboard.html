@@ -289,6 +289,81 @@ button,input,select{font-family:inherit;outline:none;border:none;background:none
 .tsm-row-input:focus{border-color:var(--blue);outline:none}
 .tsm-save-btn{width:100%;padding:13px;background:var(--blue);color:#fff;border-radius:10px;font-size:.9rem;font-weight:700;cursor:pointer;margin-top:16px;transition:.15s}
 .tsm-save-btn:hover{background:var(--blue2)}
+/* ═══════════════════════════════════════════════════════
+   DESKTOP RESPONSIVE — kicks in at 768px+
+   ═══════════════════════════════════════════════════════ */
+@media(min-width:768px){
+  body{overflow:auto}
+  .app{max-width:100%;margin:0;flex-direction:row;height:100vh;overflow:hidden}
+
+  /* Left sidebar */
+  .bnav{
+    position:fixed;left:0;top:0;bottom:0;width:220px;
+    flex-direction:column;border-top:none;border-right:1px solid var(--border);
+    background:var(--bg2);padding:0 10px 20px;
+    justify-content:flex-start;gap:4px;height:100vh;overflow-y:auto;z-index:200;
+  }
+  .bnav-tab{
+    flex-direction:row;justify-content:flex-start;gap:10px;
+    padding:11px 12px;border-radius:9px;font-size:.84rem;
+    width:100%;text-align:left;border-top:none;min-width:0;
+  }
+  .bnav-tab.on{background:var(--blue-dim);color:var(--blue)}
+  .bnav-tab-label{display:block;font-weight:600;font-size:.82rem}
+  .bnav-tab-icon{font-size:1.05rem;width:20px;text-align:center;flex-shrink:0}
+
+  /* Desktop logo row in sidebar */
+  .tb-left .brand-avatar{
+    display:none /* hidden in topbar; show in sidebar instead */
+  }
+
+  /* Main content area */
+  .main{margin-left:220px;flex:1;overflow-y:auto;height:100vh;display:flex;flex-direction:column}
+  .topbar{position:sticky;top:0;z-index:100;border-radius:0;max-width:100%;padding:0 24px;height:56px}
+  .hamburger-btn{display:none!important}
+
+  /* Trading pane: chart + panel side by side */
+  #pane-trade{display:grid!important;grid-template-columns:1fr 340px;gap:16px;padding:16px 20px;align-items:start}
+  .chart-wrap{border-radius:12px;overflow:hidden}
+  .trade-panel{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px;position:sticky;top:72px;max-height:calc(100vh - 90px);overflow-y:auto}
+
+  /* Sheets become right-side panels */
+  .sheet{
+    position:fixed;left:220px;top:0;bottom:0;right:auto;
+    width:400px;max-width:400px;max-height:100vh;
+    border-radius:0;border-top:none;border-right:1px solid var(--border2);
+    transform:translateX(-110%);
+    transition:transform .3s cubic-bezier(.4,0,.2,1);
+    box-shadow:4px 0 24px rgba(0,0,0,.5);
+  }
+  .sheet.open{transform:translateX(0)}
+  .sheet-knob{display:none}
+
+  /* Admin overlay */
+  #admin-panel-overlay{left:220px!important;max-width:none!important}
+
+  /* Toast */
+  .toast{left:calc(220px + 50%);transform:translateX(-50%) translateY(-12px)}
+  .toast.show{transform:translateX(-50%) translateY(0)}
+
+  /* Result popup */
+  .result-popup{left:220px}
+
+  /* Wider content areas */
+  #pane-history,#pane-wallet,#pane-acct,#pane-ref,#pane-scan{padding:20px 24px}
+  .ticker-outer{max-width:100%}
+  .acc-drop{left:calc(220px + 50%)}
+}
+@media(min-width:1100px){
+  .bnav{width:240px}
+  .main{margin-left:240px}
+  .sheet{left:240px;width:440px;max-width:440px}
+  #admin-panel-overlay{left:240px!important}
+  .result-popup{left:240px}
+  .toast{left:calc(240px + 50%)}
+  .acc-drop{left:calc(240px + 50%)}
+  #pane-trade{grid-template-columns:1fr 380px;padding:20px 28px}
+}
 </style>
 </head>
 <body>
@@ -435,13 +510,43 @@ button,input,select{font-family:inherit;outline:none;border:none;background:none
     <div class="exec-row" id="exec-row"></div>
   </div>
 
-  <!-- BOTTOM NAV -->
-  <div class="bottom-nav">
-    <div class="bnav on" id="bnav-trade" onclick="setNav('trade')"><div class="bnav-ico">📊</div><div class="bnav-lbl">Trade</div></div>
-    <div class="bnav" id="bnav-hist" onclick="setNav('hist')"><div class="bnav-ico">🕐</div><div class="bnav-lbl">History</div></div>
-    <div class="bnav" onclick="setNav('ai')" style="justify-content:center"><div class="bnav-ai">🤖</div><div class="bnav-lbl" style="margin-top:3px">AI</div></div>
-    <div class="bnav" id="bnav-pos" onclick="setNav('pos')"><div class="bnav-ico">📂</div><div class="bnav-lbl">Positions</div></div>
-    <div class="bnav" id="bnav-acct" onclick="setNav('acct')"><div class="bnav-ico">👤</div><div class="bnav-lbl">Account</div></div>
+  <!-- BOTTOM NAV (mobile) / LEFT SIDEBAR (desktop) -->
+  <div class="bottom-nav" id="main-sidenav">
+    <!-- Desktop-only logo row -->
+    <div class="bnav-desktop-logo" style="display:none;align-items:center;gap:10px;padding:18px 10px 14px;border-bottom:1px solid var(--border);margin-bottom:6px;width:100%">
+      <div style="width:32px;height:32px;background:linear-gradient(135deg,#e11d48,#be123c);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.8rem;font-weight:900;color:#fff;cursor:pointer;flex-shrink:0" onclick="_onLogoBrand()">EB</div>
+      <div style="font-size:.88rem;font-weight:800;color:var(--text)">EliteBinary</div>
+    </div>
+    <div class="bnav bnav-tab on" id="bnav-trade" onclick="setNav('trade')">
+      <div class="bnav-ico bnav-tab-icon">📊</div><div class="bnav-lbl bnav-tab-label">Trade</div>
+    </div>
+    <div class="bnav bnav-tab" id="bnav-hist" onclick="setNav('hist')">
+      <div class="bnav-ico bnav-tab-icon">🕐</div><div class="bnav-lbl bnav-tab-label">History</div>
+    </div>
+    <div class="bnav bnav-tab" onclick="setNav('ai')">
+      <div class="bnav-ai bnav-tab-icon">🤖</div><div class="bnav-lbl bnav-tab-label">AI Scanner</div>
+    </div>
+    <div class="bnav bnav-tab" id="bnav-pos" onclick="setNav('pos')">
+      <div class="bnav-ico bnav-tab-icon">📂</div><div class="bnav-lbl bnav-tab-label">Wallet</div>
+    </div>
+    <div class="bnav bnav-tab" id="bnav-acct" onclick="setNav('acct')">
+      <div class="bnav-ico bnav-tab-icon">👤</div><div class="bnav-lbl bnav-tab-label">Account</div>
+    </div>
+    <div class="bnav bnav-tab" onclick="openSettingsSheet()">
+      <div class="bnav-ico bnav-tab-icon">⚙️</div><div class="bnav-lbl bnav-tab-label">Settings</div>
+    </div>
+    <div class="bnav bnav-tab" id="menu-admin-row" onclick="openAdminPanel()" style="display:none">
+      <div class="bnav-ico bnav-tab-icon">🛡️</div><div class="bnav-lbl bnav-tab-label" style="color:#e11d48;font-weight:800">Admin</div>
+    </div>
+    <!-- Desktop-only bottom actions -->
+    <div class="bnav-desktop-bottom" style="display:none;flex-direction:column;gap:4px;margin-top:auto;padding-top:12px;border-top:1px solid var(--border);width:100%">
+      <div onclick="openSheet('dep-sheet')" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:9px;cursor:pointer;font-size:.82rem;font-weight:600;color:var(--green);transition:.15s" onmouseover="this.style.background='var(--green-dim)'" onmouseout="this.style.background=''">
+        <span style="font-size:1rem">💳</span><span>Deposit</span>
+      </div>
+      <div onclick="logout()" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:9px;cursor:pointer;font-size:.82rem;font-weight:600;color:var(--red);transition:.15s" onmouseover="this.style.background='var(--red-dim)'" onmouseout="this.style.background=''">
+        <span style="font-size:1rem">🚪</span><span>Sign Out</span>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -794,7 +899,10 @@ const DEP_PH={mpesa:'e.g. 0712345678',card:'e.g. 4111 1111 1111 1111',bank:'e.g.
   }
 
   const users=getDB();
-  let user = users.find(u=>u.id===session.userId && u.password===session.pwHash);
+  // Match local user: password match OR no password stored (server-JWT session has pwHash=null)
+  let user = users.find(u=>u.id===session.userId &&
+    (session.pwHash === null || session.pwHash === undefined || u.password===session.pwHash)
+  );
 
   if(!user && resolvedToken && session.userId){
     // Server-JWT session (admin or API-registered user) — build a local shell
@@ -849,7 +957,8 @@ const DEP_PH={mpesa:'e.g. 0712345678',card:'e.g. 4111 1111 1111 1111',bank:'e.g.
   }
 
   setInterval(()=>{cfg=getConfig();renderExecBtns();},5000);
-  window.addEventListener('resize',()=>{resizeCanvas();drawChart();});
+  window.addEventListener('resize',()=>{resizeCanvas();drawChart();applyDesktopLayout();});
+  applyDesktopLayout();
   document.addEventListener('click',e=>{
     if(!e.target.closest('.bal-pill')&&!e.target.closest('.acc-drop'))
       document.getElementById('acc-drop').classList.remove('open');
@@ -1423,96 +1532,79 @@ function updDepInfo(){
 }
 async function doDep(){
   const kesInput = parseFloat(document.getElementById('dep-amt-kes').value) || 0;
-  const contact  = document.getElementById('dep-contact').value.trim();
+  const contact  = (document.getElementById('dep-contact').value||'').trim();
   const msg      = document.getElementById('dep-msg');
   const btn      = document.querySelector('#dep-sheet .sheet-btn.blue');
-
   const MIN_KES  = 500;
-  const MIN_USD  = 3.87;
 
-  // ── Validation ────────────────────────────────────────────────
-  if(kesInput < MIN_KES){
-    msg.style.color='var(--red)';
-    msg.textContent='Minimum deposit is KES 500 (≈ $' + MIN_USD + ')';
-    return;
-  }
-  if(!contact){
-    msg.style.color='var(--red)';
-    msg.textContent='Please enter your M-Pesa phone number';
-    return;
-  }
-  if(accountMode==='demo'){
-    msg.style.color='var(--amber)';
-    msg.textContent='Switch to Real account to make a real deposit';
-    return;
-  }
+  if(kesInput < MIN_KES){ msg.style.color='var(--red)'; msg.textContent='Minimum deposit is KES 500'; return; }
+  if(!contact){ msg.style.color='var(--red)'; msg.textContent='Enter your M-Pesa phone number'; return; }
+  if(accountMode==='demo'){ msg.style.color='var(--amber)'; msg.textContent='Switch to Real account to deposit'; return; }
 
-  // ── Normalise phone to 2547XXXXXXXX format ───────────────────
-  let phone = contact.replace(/\D/g,''); // strip non-digits
-  if(phone.startsWith('0'))       phone = '254' + phone.slice(1);
-  if(phone.startsWith('7')||phone.startsWith('1')) phone = '254' + phone;
+  // Normalise phone → 254XXXXXXXXX (12 digits)
+  let phone = contact.replace(/\D/g,'');
+  if(phone.startsWith('0'))                         phone = '254'+phone.slice(1);
+  else if(phone.startsWith('7')||phone.startsWith('1')) phone = '254'+phone;
   if(!phone.startsWith('254')||phone.length!==12){
-    msg.style.color='var(--red)';
-    msg.textContent='Enter a valid Kenyan number e.g. 0712345678';
-    return;
+    msg.style.color='var(--red)'; msg.textContent='Invalid number. Use: 0712345678'; return;
   }
 
-  // ── Convert KES → USD for backend ────────────────────────────
   const amtUsd = Math.round((kesInput / KES_RATE) * 100) / 100;
 
-  // ── Loading state ─────────────────────────────────────────────
+  // Resolve token from every possible location
+  const sess = getSess()||{};
+  const token = currentToken || localStorage.getItem('eliteBinaryToken') || sess.serverToken || sess.token || '';
+  if(!token){
+    msg.style.color='var(--red)'; msg.textContent='Session expired — please log out and log in again.'; return;
+  }
+
   msg.style.color='var(--text3)';
-  msg.textContent='📲 Sending STK push to ' + phone + '…';
+  msg.textContent='📲 Sending STK push to +'+phone+'…';
   if(btn){ btn.disabled=true; btn.textContent='Sending…'; }
 
   try{
-    const token = currentToken || localStorage.getItem('eliteBinaryToken') || '';
-    const resp  = await fetch('/api/deposits',{
+    const resp = await fetch('/api/deposits',{
       method:'POST',
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
       body: JSON.stringify({ method:'mpesa', phone, amount: amtUsd, amountKes: kesInput })
     });
-    const data = await resp.json();
-    if(!resp.ok) throw new Error(data.error || 'Deposit failed');
+    const data = await resp.json().catch(()=>({error:'Invalid server response'}));
 
-    // Record locally
-    const dep = {
-      id: data.deposit?.id || ('dep_'+Date.now()),
-      type:'deposit', amount: amtUsd, amountKes: kesInput,
-      method:'mpesa', contact: phone,
-      status: data.deposit?.status || 'pending_stk',
-      account:'real',
-      date: new Date().toLocaleString(),
-      created_at: new Date().toISOString()
-    };
+    if(!resp.ok){
+      const err = data.error || 'Deposit failed ('+resp.status+')';
+      msg.style.color='var(--red)'; msg.textContent='✗ '+err;
+      if(resp.status===401) msg.textContent='✗ Session expired — please log out and log back in.';
+      showToast('Deposit Failed', err, 'loss'); return;
+    }
+
+    // Store record locally
     if(!currentUser.deposits) currentUser.deposits=[];
-    currentUser.deposits.unshift(dep);
-    saveUserToDB(currentUser);
-    renderTxnRecords();
+    currentUser.deposits.unshift({id:data.deposit?.id||('dep_'+Date.now()),
+      type:'deposit',amount:amtUsd,amountKes:kesInput,method:'mpesa',contact:phone,
+      status:data.deposit?.status||'pending_stk',account:'real',date:new Date().toLocaleString()});
+    saveUserToDB(currentUser); renderTxnRecords();
+    document.getElementById('dep-amt-kes').value='';
+    document.getElementById('dep-contact').value='';
+    updDepInfo();
 
-    if(data.deposit?.status === 'completed'){
-      // Mock mode — credited immediately
-      realBalance = data.user?.balance ?? realBalance + amtUsd;
-      if(accountMode==='real'){ balance=realBalance; }
-      updateBalDisp();
-      msg.style.color='var(--green)';
-      msg.textContent='✓ KES ' + kesInput + ' ($' + amtUsd.toFixed(2) + ') credited!';
-      showToast('Deposit Success','$'+amtUsd.toFixed(2)+' added to Real account','ok');
-      document.getElementById('dep-amt-kes').value='';
-      document.getElementById('dep-contact').value='';
-    } else {
-      // Live STK push sent
+    const isMock = data.deposit?.paymentProvider==='mock'||data.deposit?.status==='completed';
+    if(isMock){
+      realBalance = typeof data.user?.balance==='number' ? data.user.balance : realBalance+amtUsd;
+      if(accountMode==='real'){ balance=realBalance; updateBalDisp(); }
+      const ddR=document.getElementById('dd-real'); if(ddR) ddR.textContent='$'+realBalance.toFixed(2);
       msg.style.color='var(--amber)';
-      msg.textContent='📲 M-Pesa prompt sent! Enter your PIN on ' + phone + ' to complete';
-      showToast('STK Sent','Enter your M-Pesa PIN to complete KES '+kesInput+' deposit','ok');
-      document.getElementById('dep-amt-kes').value='';
-      document.getElementById('dep-contact').value='';
+      msg.textContent='⚠️ MOCK MODE — KES '+kesInput+' added instantly. To receive real STK: set MOCK_PAYMENTS=false in .env and restart server.';
+      showToast('Mock Deposit','$'+amtUsd.toFixed(2)+' credited (mock mode)','ok');
+    } else {
+      msg.style.color='var(--green)';
+      msg.textContent='📲 STK prompt sent to +'+phone+'! Enter your M-Pesa PIN to complete KES '+kesInput+'.';
+      showToast('STK Sent','Enter M-Pesa PIN for KES '+kesInput,'ok');
       pollRealBalance(data.deposit?.id, 12, 5000);
     }
   } catch(e){
     msg.style.color='var(--red)';
-    msg.textContent = e.message || 'Network error — is the server running? (npm start)';
-    showToast('Deposit Failed', e.message || 'Network error', 'loss');
+    msg.textContent='✗ '+(e.message||'Network error')+(' — server running? run: npm start');
+    showToast('Error', e.message||'Network error', 'loss');
   } finally {
     if(btn){ btn.disabled=false; btn.textContent='📲 Send STK Push'; }
   }
@@ -1820,6 +1912,25 @@ function copyRef(){
 // ══════════════════════════════════════════════
 // NAV & SHEETS
 // ══════════════════════════════════════════════
+function applyDesktopLayout(){
+  const isDesktop = window.innerWidth >= 768;
+  // Show/hide desktop-only sidebar elements
+  document.querySelectorAll('.bnav-desktop-logo,.bnav-desktop-bottom').forEach(el=>{
+    el.style.display = isDesktop ? 'flex' : 'none';
+  });
+  // On desktop the sidenav becomes a full sidebar — wrap .main if needed
+  const app = document.querySelector('.app');
+  const sidenav = document.getElementById('main-sidenav');
+  const main = document.querySelector('.main');
+  if(isDesktop){
+    if(sidenav) sidenav.style.display='flex';
+    if(main) main.style.marginLeft='';// handled by CSS
+  } else {
+    if(sidenav) sidenav.style.display='';
+    document.querySelectorAll('.bnav-tab-label').forEach(el=>el.style.display='');
+  }
+}
+
 function setNav(tab){
   ['trade','hist','pos','acct'].forEach(t=>{const e=document.getElementById('bnav-'+t);if(e)e.classList.toggle('on',t===tab);});
   if(tab==='hist'){updateStats();renderHist();openSheet('hist-sheet');}
@@ -2392,6 +2503,16 @@ function logout(){
         💾 Save All Config
       </button>
       <div id="adm-fullcfg-msg" style="margin-top:7px;font-size:.74rem;font-weight:600;text-align:center;min-height:16px"></div>
+    </div>
+    <div class="adm-section" style="margin-bottom:20px">
+      <div class="adm-section-title">🗄️ Database Connection</div>
+      <div id="adm-db-status-card" style="background:#0a0e17;border:1px solid #1e2d45;border-radius:8px;padding:12px;margin-bottom:10px">
+        <div style="font-size:.75rem;color:#3a506a">Tap check to verify Supabase connection</div>
+      </div>
+      <button onclick="admCheckDbStatus()"
+        style="width:100%;padding:10px;background:rgba(27,110,245,.15);border:1px solid rgba(27,110,245,.3);border-radius:8px;font-size:.82rem;font-weight:700;color:#1b6ef5;cursor:pointer">
+        🔍 Check Database Connection
+      </button>
     </div>
     <div class="adm-section" style="margin-bottom:20px">
       <div class="adm-section-title">📱 App Version Control</div>
@@ -3039,6 +3160,49 @@ function admPostAnnouncement(){
   showToast('Admin','Announcement live','ok');
 }
 
+
+async function admCheckDbStatus(){
+  const card = document.getElementById('adm-db-status-card');
+  if(card) card.innerHTML='<div style="font-size:.75rem;color:#7a8fb0">Checking…</div>';
+  try{
+    const res = await fetch('/api/admin/db-status', {headers: admHeaders()});
+    const d = await res.json();
+    if(!res.ok){ if(card) card.innerHTML='<div style="color:#ef4444;font-size:.78rem">✗ '+d.error+'</div>'; return; }
+    const isSupabase = d.supabaseConfigured;
+    const isOk = d.supabaseReachable || !isSupabase;
+    const statusColor = isOk ? '#22c55e' : '#ef4444';
+    const icon = isOk ? '✓' : '✗';
+    if(card) card.innerHTML=`
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <div style="width:10px;height:10px;border-radius:50%;background:${statusColor};box-shadow:0 0 8px ${statusColor}"></div>
+        <div style="font-size:.82rem;font-weight:800;color:${statusColor}">${icon} ${isSupabase?(d.supabaseReachable?'Supabase Connected':'Supabase Error'):'Local File DB'}</div>
+      </div>
+      ${isSupabase?`<div style="font-size:.7rem;color:#7a8fb0;margin-bottom:4px">Project: ${d.supabaseUrl||'—'}</div>`:''}
+      ${isSupabase?`<div style="font-size:.7rem;color:#7a8fb0;margin-bottom:4px">Table: ${d.supabaseTable} · ID: ${d.supabaseId}</div>`:''}
+      ${d.supabaseError?`<div style="font-size:.7rem;color:#ef4444;margin-bottom:4px">Error: ${d.supabaseError}</div>`:''}
+      ${!isSupabase?`<div style="font-size:.7rem;color:#f59e0b">⚠️ Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env for persistent storage</div>`:''}
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-top:8px">
+        <div style="text-align:center;background:#111827;border-radius:6px;padding:6px">
+          <div style="font-size:.6rem;color:#3a506a;text-transform:uppercase">Users</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:.9rem;font-weight:800;color:#e2e8f8">${d.userCount||0}</div>
+        </div>
+        <div style="text-align:center;background:#111827;border-radius:6px;padding:6px">
+          <div style="font-size:.6rem;color:#3a506a;text-transform:uppercase">Trades</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:.9rem;font-weight:800;color:#e2e8f8">${d.tradeCount||0}</div>
+        </div>
+        <div style="text-align:center;background:#111827;border-radius:6px;padding:6px">
+          <div style="font-size:.6rem;color:#3a506a;text-transform:uppercase">Deposits</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:.9rem;font-weight:800;color:#e2e8f8">${d.depositCount||0}</div>
+        </div>
+        <div style="text-align:center;background:#111827;border-radius:6px;padding:6px">
+          <div style="font-size:.6rem;color:#3a506a;text-transform:uppercase">Withdrawals</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:.9rem;font-weight:800;color:#e2e8f8">${d.withdrawalCount||0}</div>
+        </div>
+      </div>`;
+  } catch(e){
+    if(card) card.innerHTML='<div style="color:#ef4444;font-size:.78rem">✗ Server not reachable — run: npm start</div>';
+  }
+}
 </script>
 </body>
 </html>
