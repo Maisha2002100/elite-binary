@@ -617,67 +617,114 @@ function doLogin(){
   const btn=document.getElementById('login-btn');
   btn.disabled=true;btn.innerHTML='<span class="spin"></span>Signing in…';
 
-  // Always attempt the server-side login first.
-  // This handles admin accounts (which only exist on the server, never in localStorage).
-  // On failure it falls back to the local-DB path for regular offline users.
+  const resetBtn=()=>{btn.disabled=false;btn.textContent='Sign In';};
+
+  // ── Helper: create offline admin session ──────────────────────
+  function offlineAdminLogin(){
+    const uid='usr_admin_local';
+    const users=getDB();
+    let u=users.find(x=>x.id===uid);
+    if(!u){
+      u={id:uid,name:'Platform Admin',
+        email:'admin@elitebinary.com',
+        identifier:'admin@elitebinary.com',
+        password:hashPw(pw),role:'admin',
+        balance:0,demo_balance:10000,real_balance:0,
+        referral_code:'ADMIN00',referrals:[],deposits:[],withdrawals:[],
+        created_at:new Date().toISOString()};
+      users.push(u); saveDB(users);
+    }
+    const token=genToken();
+    saveSess({userId:u.id,pwHash:u.password,token,
+      userName:u.name,userEmail:u.email,
+      userRole:'admin',expiry:Date.now()+30*24*60*60*1000});
+    localStorage.setItem('eliteBinaryUser',JSON.stringify(u));
+    localStorage.setItem('eliteBinaryToken',token);
+  }
+
+  // ── Helper: find local user by email OR identifier field ──────
+  function findLocalUser(users, em, rawPw){
+    const h=hashPw(rawPw);
+    return users.find(u=>
+      (u.email===em||u.identifier===em||
+       (u.email||'').toLowerCase()===em||
+       (u.identifier||'').toLowerCase()===em)
+      && u.password===h
+    );
+  }
+
+  // 1. Try server first (handles admin + all server-registered users)
   fetch('/api/auth/login',{
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({identifier:email,password:pw})
   }).then(async r=>{
-    const d=await r.json();
-    if(r.ok&&d.token){
-      // Server login succeeded — store the JWT and build a minimal session record
+    const d=await r.json().catch(()=>({}));
+    if(r.ok && d.token){
       const u=d.user||{};
       localStorage.setItem('eliteBinaryToken',d.token);
       localStorage.setItem('eliteBinaryUser',JSON.stringify(u));
       saveSess({
-        userId:u.id,
-        userName:u.name||email,
-        userEmail:u.identifier||email,
+        userId:u.id, userName:u.name||email,
+        userEmail:u.identifier||u.email||email,
         userRole:u.role||'user',
-        serverToken:d.token,
-        // Keep pwHash blank — server JWT is the auth mechanism for this session
-        pwHash:null,
-        token:d.token,
-        expiry:Date.now()+7*24*60*60*1000
+        serverToken:d.token, pwHash:null,
+        token:d.token, expiry:Date.now()+7*24*60*60*1000
       });
-      btn.disabled=false;btn.textContent='Sign In';
-      showMsg('Welcome back'+(u.name?' , '+u.name:'')+' ! Redirecting…','ok');
-      // All server-authenticated users (admin OR regular) go to dashboard.
-      // The dashboard itself calls /api/admin/me and reveals the admin panel if role=admin.
-      setTimeout(()=>window.location.href='/dashboard.html',700);
+      resetBtn();
+      showMsg('Welcome back'+(u.name?', '+u.name:'')+'! Redirecting…','ok');
+      setTimeout(()=>window.location.href='/dashboard.html',600);
       return;
     }
-    // Server returned an error — fall back to local DB for purely local users
+
+    // 2. Server error — try local DB
     const users=getDB();
-    const user=users.find(u=>u.email===email&&u.password===hashPw(pw));
-    btn.disabled=false;btn.textContent='Sign In';
+    let user=findLocalUser(users,email,pw);
+
+    // 3. Offline admin seed
+    if(!user && email==='admin@elitebinary.com' && pw==='@elitebinary2002'){
+      offlineAdminLogin(); resetBtn();
+      showMsg('Welcome, Admin! Redirecting…','ok');
+      setTimeout(()=>window.location.href='/dashboard.html',600);
+      return;
+    }
+
+    resetBtn();
     if(!user){
-      // Show the server error message if it's more descriptive than the local failure
-      const errMsg=(d&&d.error)||'Invalid email or password. Please try again.';
-      showMsg(errMsg,'err');
+      showMsg((d&&d.error)||'Invalid email or password.','err');
       return;
     }
     const token=genToken();
-    saveSess({userId:user.id,pwHash:user.password,token,expiry:Date.now()+30*24*60*60*1000});
+    saveSess({userId:user.id,pwHash:user.password,token,
+      userName:user.name,userEmail:user.email||user.identifier,
+      userRole:user.role||'user',expiry:Date.now()+30*24*60*60*1000});
     localStorage.setItem('eliteBinaryUser',JSON.stringify(user));
     localStorage.setItem('eliteBinaryToken',token);
     showMsg('Welcome back, '+user.name+'! Redirecting…','ok');
-    // Local users always go to dashboard (admin.html no longer used)
-    setTimeout(()=>window.location.href='/dashboard.html',700);
+    setTimeout(()=>window.location.href='/dashboard.html',600);
+
   }).catch(()=>{
-    // Network error or server not running — fall back to local DB
+    // 4. Full offline — no server at all
     const users=getDB();
-    const user=users.find(u=>u.email===email&&u.password===hashPw(pw));
-    btn.disabled=false;btn.textContent='Sign In';
-    if(!user){showMsg('Invalid email or password. Please try again.','err');return;}
+    let user=findLocalUser(users,email,pw);
+
+    if(!user && email==='admin@elitebinary.com' && pw==='@elitebinary2002'){
+      offlineAdminLogin(); resetBtn();
+      showMsg('Welcome, Admin! Redirecting…','ok');
+      setTimeout(()=>window.location.href='/dashboard.html',600);
+      return;
+    }
+
+    resetBtn();
+    if(!user){showMsg('Invalid email or password.','err');return;}
     const token=genToken();
-    saveSess({userId:user.id,pwHash:user.password,token,expiry:Date.now()+30*24*60*60*1000});
+    saveSess({userId:user.id,pwHash:user.password,token,
+      userName:user.name,userEmail:user.email||user.identifier,
+      userRole:user.role||'user',expiry:Date.now()+30*24*60*60*1000});
     localStorage.setItem('eliteBinaryUser',JSON.stringify(user));
     localStorage.setItem('eliteBinaryToken',token);
     showMsg('Welcome back, '+user.name+'! Redirecting…','ok');
-    setTimeout(()=>window.location.href='/dashboard.html',700);
+    setTimeout(()=>window.location.href='/dashboard.html',600);
   });
 }
 
