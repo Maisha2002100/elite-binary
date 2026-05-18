@@ -1530,6 +1530,46 @@ function updDepInfo(){
   document.getElementById('ds-send').textContent = 'KES ' + kes.toLocaleString();
   document.getElementById('ds-recv').textContent = '$' + usd.toFixed(2);
 }
+// Returns a valid server JWT. If the stored token is a fake local one (tk_…),
+// silently re-authenticates with the server to get a real JWT.
+async function getValidToken(user){
+  const stored = currentToken || localStorage.getItem('eliteBinaryToken') || '';
+  // Real JWT has 3 dot-separated parts; local tokens start with 'tk_'
+  const isRealJwt = stored && stored.split('.').length === 3;
+  if(isRealJwt) return stored;
+
+  // Try to get a real JWT by logging in via server
+  try{
+    const sess = getSess()||{};
+    const identifier = (user&&(user.email||user.identifier)) || sess.userEmail || '';
+    if(!identifier) return null;
+
+    // Try login first (user already exists on server)
+    let r = await fetch('/api/auth/login',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({identifier, password:''})});
+    let d = await r.json().catch(()=>({}));
+
+    // If login fails, try registering (first time on this server instance)
+    if(!r.ok || !d.token){
+      r = await fetch('/api/auth/register',{method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({identifier, name:user?.name||'User', password:'', demo:false})});
+      d = await r.json().catch(()=>({}));
+    }
+
+    if(d.token){
+      currentToken = d.token;
+      localStorage.setItem('eliteBinaryToken', d.token);
+      const s = getSess()||{};
+      saveSess({...s, serverToken:d.token, token:d.token,
+        userId:d.user?.id||s.userId, pwHash:null});
+      return d.token;
+    }
+  }catch(_){}
+  return stored || null;
+}
+
 async function doDep(){
   const kesInput = parseFloat(document.getElementById('dep-amt-kes').value) || 0;
   const contact  = (document.getElementById('dep-contact').value||'').trim();
@@ -1551,11 +1591,11 @@ async function doDep(){
 
   const amtUsd = Math.round((kesInput / KES_RATE) * 100) / 100;
 
-  // Resolve token from every possible location
-  const sess = getSess()||{};
-  const token = currentToken || localStorage.getItem('eliteBinaryToken') || sess.serverToken || sess.token || '';
+  // Resolve token — local tk_ tokens are not valid JWTs; try to swap for a real one
+  msg.style.color='var(--text3)'; msg.textContent='Authenticating…';
+  const token = await getValidToken(currentUser);
   if(!token){
-    msg.style.color='var(--red)'; msg.textContent='Session expired — please log out and log in again.'; return;
+    msg.style.color='var(--red)'; msg.textContent='✗ Session expired — please log out and log back in.'; return;
   }
 
   msg.style.color='var(--text3)';
@@ -1657,7 +1697,8 @@ async function doWd(){
   if(btn){btn.disabled=true;btn.textContent='Please wait…';}
 
   try{
-    const token=currentToken||localStorage.getItem('eliteBinaryToken')||'';
+    const token = await getValidToken(currentUser);
+    if(!token){ msg.style.color='var(--red)'; msg.textContent='✗ Session expired — please log out and log back in.'; if(btn){btn.disabled=false;btn.textContent='Request Withdrawal';} return; }
     const resp=await fetch('/api/withdrawals',{
       method:'POST',
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
