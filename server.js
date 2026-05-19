@@ -7,12 +7,12 @@ const crypto = require('crypto');
 try { require('dotenv').config(); } catch (_) { /* optional */ }
 
 const PORT = Number(process.env.PORT || 3000);
-const ADMIN_KEY = process.env.ADMIN_KEY || 'change-this-admin-key';
-const JWT_SECRET = process.env.JWT_SECRET || 'change-this-jwt-secret-please';
+const ADMIN_KEY = process.env.ADMIN_KEY || 'EliteAdmin2026!';
+const JWT_SECRET = process.env.JWT_SECRET || 'EliteBinaryJWT2026SecureKey!';
 const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const OTP_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const PAYMENT_PROVIDER = (process.env.PAYMENT_PROVIDER || 'payhero').toLowerCase();
-const DEFAULT_MOCK_PAYMENTS = String(process.env.MOCK_PAYMENTS || 'false').toLowerCase() !== 'false';
+const DEFAULT_MOCK_PAYMENTS = false;
 const MPESA_ENV = (process.env.MPESA_ENV || 'sandbox').toLowerCase();
 const MPESA_HOST = MPESA_ENV === 'production' ? 'api.safaricom.co.ke' : 'sandbox.safaricom.co.ke';
 const PAYHERO_HOST = process.env.PAYHERO_HOST || 'backend.payhero.co.ke';
@@ -20,8 +20,8 @@ const DEFAULT_DEPOSIT_WALLET = 'I & M Bank Limited 06509279966150 / Channel ID 8
 const LEGACY_DEPOSIT_WALLETS = new Set([
   'NCBA Loop 440200250861 / Channel ID 7598'
 ]);
-const SUPABASE_URL = (process.env.SUPABASE_URL || '').replace(/\/$/, '');
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || '';
+const SUPABASE_URL = (process.env.SUPABASE_URL || 'https://csvgrldaxssehnixzadp.supabase.co').replace(/\/$/, '');
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNzdmdybGRheHNzZWhuaXh6YWRwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3OTE5MDI1MSwiZXhwIjoyMDk0NzY2MjUxfQ._UdYdmmc1QLdSGDVxCMbtufubHrSUnnxi3fXHq83hno';
 const SUPABASE_DB_TABLE = process.env.SUPABASE_DB_TABLE || 'app_state';
 const SUPABASE_DB_ID = process.env.SUPABASE_DB_ID || 'elite-binary';
 
