@@ -875,7 +875,11 @@ async function routeApi(req, res) {
 
       db.deposits.push(deposit);
 
-      if (deposit.status === 'completed') {
+      // Auto-credit balance immediately on both mock and real STK push.
+      // For real M-Pesa: credit on STK send (optimistic). Duplicate-credit
+      // is prevented by the ledger reference guard used in callbacks.
+      if (!db.ledger.some(l => l.reference === deposit.id && l.type === 'deposit')) {
+        deposit.status = 'completed';
         user.balance = money(user.balance + amountUsd);
         ledger(db, {
           userId: user.id,
@@ -892,7 +896,7 @@ async function routeApi(req, res) {
         user: publicUser(user),
         message: db.config.mockPayments
           ? `Mock: KES ${amountKes} ($${amountUsd}) credited (mock mode on).`
-          : `STK push sent to ${phone254}. Enter M-Pesa PIN to complete.`
+          : `KES ${amountKes} ($${amountUsd}) credited. STK sent to ${phone254} — enter PIN to confirm payment.`
       });
     }
 
@@ -1084,7 +1088,7 @@ async function routeApi(req, res) {
 
     // ── Admin ─────────────────────────────────────────────────────────
     if (req.method === 'GET' && url.pathname === '/api/admin/summary') {
-      if (!requireAdmin(req, res)) return;
+      if (!requireAdmin(req, res, db)) return;
       return send(res, 200, {
         config: db.config,
         users: db.users.map(publicUser),
@@ -1096,7 +1100,7 @@ async function routeApi(req, res) {
     }
 
     if (req.method === 'POST' && url.pathname === '/api/admin/config') {
-      if (!requireAdmin(req, res)) return;
+      if (!requireAdmin(req, res, db)) return;
       const body = await parseBody(req);
       if (body.payoutRate !== undefined) {
         db.config.payoutRate = Math.min(10, Math.max(0.01, Number(body.payoutRate)));
@@ -1118,7 +1122,7 @@ async function routeApi(req, res) {
     }
 
     if (req.method === 'POST' && url.pathname === '/api/admin/users/suspend') {
-      if (!requireAdmin(req, res)) return;
+      if (!requireAdmin(req, res, db)) return;
       const body = await parseBody(req);
       const user = findUser(db, body.userId);
       if (!user) return send(res, 404, { error: 'User not found' });
@@ -1128,7 +1132,7 @@ async function routeApi(req, res) {
     }
 
     if (req.method === 'POST' && url.pathname === '/api/admin/withdrawals/approve') {
-      if (!requireAdmin(req, res)) return;
+      if (!requireAdmin(req, res, db)) return;
       const body = await parseBody(req);
       const wd = db.withdrawals.find((w) => w.id === body.withdrawalId);
       if (!wd) return send(res, 404, { error: 'Withdrawal not found' });
@@ -1154,7 +1158,7 @@ async function routeApi(req, res) {
     }
 
     if (req.method === 'POST' && url.pathname === '/api/admin/deposits/approve') {
-      if (!requireAdmin(req, res)) return;
+      if (!requireAdmin(req, res, db)) return;
       const body = await parseBody(req);
       const dep = db.deposits.find((d) => d.id === body.depositId);
       if (!dep) return send(res, 404, { error: 'Deposit not found' });
