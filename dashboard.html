@@ -1627,17 +1627,19 @@ async function doDep(){
     document.getElementById('dep-contact').value='';
     updDepInfo();
 
-    const isMock = data.deposit?.paymentProvider==='mock'||data.deposit?.status==='completed';
-    if(isMock){
-      realBalance = typeof data.user?.balance==='number' ? data.user.balance : realBalance+amtUsd;
+    // Server now auto-credits on both mock and real STK — always update balance from response
+    if(typeof data.user?.balance==='number'){
+      realBalance = data.user.balance;
       if(accountMode==='real'){ balance=realBalance; updateBalDisp(); }
       const ddR=document.getElementById('dd-real'); if(ddR) ddR.textContent='$'+realBalance.toFixed(2);
-      msg.style.color='var(--amber)';
-      msg.textContent='⚠️ MOCK MODE — KES '+kesInput+' added instantly. To receive real STK: set MOCK_PAYMENTS=false in .env and restart server.';
-      showToast('Mock Deposit','$'+amtUsd.toFixed(2)+' credited (mock mode)','ok');
+    }
+    if(data.deposit?.status==='completed'){
+      msg.style.color='var(--green)';
+      msg.textContent='✓ KES '+kesInput+' ($'+amtUsd.toFixed(2)+') credited to your real account!';
+      showToast('Deposit Credited','$'+amtUsd.toFixed(2)+' added to real balance','ok');
     } else {
       msg.style.color='var(--green)';
-      msg.textContent='📲 STK prompt sent to +'+phone+'! Enter your M-Pesa PIN to complete KES '+kesInput+'.';
+      msg.textContent='📲 STK sent to +'+phone+'. Enter M-Pesa PIN — balance will update shortly.';
       showToast('STK Sent','Enter M-Pesa PIN for KES '+kesInput,'ok');
       pollRealBalance(data.deposit?.id, 12, 5000);
     }
