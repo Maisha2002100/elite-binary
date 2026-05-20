@@ -762,45 +762,37 @@ function doRegister(){
   if(!terms){showMsg('You must agree to the Terms of Service to continue','err');ok=false;}
   if(!ok) return;
 
-  const users=getDB();
-  if(users.find(u=>u.email===email)){showMsg('Email already registered. Please login.','err');return;}
-
   const btn=document.getElementById('reg-btn');
   btn.disabled=true;btn.innerHTML='<span class="spin"></span>Creating account…';
 
-  setTimeout(()=>{
-    let referrerId=null;
-    if(ref){ const referrer=users.find(u=>u.referral_code===ref);if(referrer)referrerId=referrer.id; }
-
-    const newUser={
-      id:genId(),name,email,phone,
-      password:hashPw(pw),role:'user',
-      balance:10000,
-      demo_balance:10000,   // virtual demo funds — always $10,000 to start
-      real_balance:0,       // real funds start at $0 until a deposit is made
-      referral_code:genRef(),
-      referred_by:referrerId,
-      referrals:[],deposits:[],withdrawals:[],
-      created_at:new Date().toISOString()
-    };
-    users.push(newUser);
-    saveDB(users);
-
-    if(referrerId){
-      const refs=JSON.parse(localStorage.getItem(DB_REFS)||'[]');
-      refs.push({referrer_id:referrerId,referred_id:newUser.id,bonus_paid:false,bonus_amount:0,deposit_amount:0,created_at:new Date().toISOString()});
-      localStorage.setItem(DB_REFS,JSON.stringify(refs));
-    }
-
-    const token=genToken();
-    saveSess({userId:newUser.id,pwHash:newUser.password,token,expiry:Date.now()+30*24*60*60*1000});
-    localStorage.setItem('eliteBinaryUser',JSON.stringify(newUser));
-    localStorage.setItem('eliteBinaryToken',token);
-
+  // Always register via server — saves to Supabase permanently
+  fetch('/api/auth/register',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({identifier:email, name, phone, password:pw, referral:ref, demo:false})
+  }).then(async r=>{
+    const d=await r.json().catch(()=>({}));
     btn.disabled=false;btn.textContent='Create Account';
-    showMsg('Account created! Welcome to EliteBinary 🎉','ok');
-    setTimeout(()=>window.location.href='/dashboard.html',800);
-  },600);
+    if(r.ok && d.token){
+      const u=d.user||{};
+      localStorage.setItem('eliteBinaryToken',d.token);
+      localStorage.setItem('eliteBinaryUser',JSON.stringify(u));
+      saveSess({
+        userId:u.id, userName:u.name||name,
+        userEmail:u.identifier||email,
+        userRole:u.role||'user',
+        serverToken:d.token, token:d.token,
+        expiry:Date.now()+7*24*60*60*1000
+      });
+      showMsg('Account created! Welcome to EliteBinary 🎉','ok');
+      setTimeout(()=>window.location.href='/dashboard.html',800);
+    } else {
+      showMsg((d&&d.error)||'Registration failed. Please try again.','err');
+    }
+  }).catch(()=>{
+    btn.disabled=false;btn.textContent='Create Account';
+    showMsg('Cannot connect to server. Please check your connection.','err');
+  });
 }
 
 // ══════════════════════════════════════════════
