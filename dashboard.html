@@ -869,7 +869,7 @@ let cfg=getConfig();
 let ws=null;
 let sym='1HZ10V', symName='Vol 10 (1s)';
 let symOpen={}, symLast={};
-let ticks=[], digitCounts=new Array(10).fill(0), totalTicks=0, lastDig=-1, selDig=-1;
+let ticks=[], digitCounts=new Array(10).fill(0), totalTicks=0, lastDig=-1, selDig=-1, selBarrier=5;
 let contractType='DIGITEVEN';
 let cvs, cx, cW=0, cH=0, zoom=1;
 
@@ -1116,6 +1116,7 @@ function renderDigitRow(){
   }).join('');
 }
 function selDigit(d){selDig=(selDig===d)?-1:d;renderDigitRow();renderExecBtns();}
+function selBarrierDigit(d){selBarrier=d;renderExecBtns();}
 
 // ══════════════════════════════════════════════
 // CONTRACT & EXEC
@@ -1137,21 +1138,68 @@ function renderExecBtns(){
   const rate=cfg.payout_rate||0.952;
   const payout=(stake*(1+rate)).toFixed(2);
   const pct=(rate*100).toFixed(1)+'%';
+  const clickFn=tradeMode==='auto'?'startAutoTrade':'placeTrade';
+
+  // Matches / Differs — digit picker
+  if(contractType==='DIGITMATCH'||contractType==='DIGITDIFF'){
+    const dBtns=[0,1,2,3,4,5,6,7,8,9].map(d=>{
+      const on=selDig===d;
+      return `<button onclick="selDigit(${d})" style="width:30px;height:30px;border-radius:50%;border:2px solid ${on?'var(--blue)':'var(--border2)'};background:${on?'var(--blue-dim)':'var(--bg3)'};color:${on?'var(--blue)':'var(--text2)'};font-family:'JetBrains Mono',monospace;font-size:.82rem;font-weight:700;cursor:pointer">${d}</button>`;
+    }).join('');
+    const dis=selDig<0?'disabled':'';
+    const op=selDig<0?'opacity:.4;':'';
+    row.innerHTML=`<div style="width:100%;display:flex;flex-direction:column;gap:8px;padding:0 2px">
+      <div style="font-size:.63rem;font-weight:800;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;text-align:center">Select Last Digit</div>
+      <div style="display:flex;gap:3px;justify-content:center">${dBtns}</div>
+      <div style="display:flex;gap:6px">
+        <button class="exec-btn up" style="flex:1;${op}" onclick="${clickFn}('Match')" ${dis}>
+          <div class="exec-btn-left"><div class="exec-name">Matches ${selDig>=0?selDig:'?'}</div><div class="exec-pct">${pct}</div></div>
+          <div class="exec-btn-right"><div class="exec-payout-amt">$${payout}</div><div class="exec-payout-lbl">Payout</div></div>
+        </button>
+        <button class="exec-btn dn" style="flex:1;${op}" onclick="${clickFn}('Differ')" ${dis}>
+          <div class="exec-btn-left"><div class="exec-name">Differs ${selDig>=0?selDig:'?'}</div><div class="exec-pct">${pct}</div></div>
+          <div class="exec-btn-right"><div class="exec-payout-amt">$${payout}</div><div class="exec-payout-lbl">Payout</div></div>
+        </button>
+      </div>
+      ${selDig<0?`<div style="text-align:center;font-size:.7rem;color:var(--amber);font-weight:600">&#9888; Tap a digit above to enable trading</div>`:''}
+    </div>`;
+    return;
+  }
+
+  // Over / Under — barrier picker
+  if(contractType==='DIGITOVER'||contractType==='DIGITUNDER'){
+    const bBtns=[0,1,2,3,4,5,6,7,8,9].map(d=>{
+      const on=selBarrier===d;
+      return `<button onclick="selBarrierDigit(${d})" style="width:30px;height:30px;border-radius:50%;border:2px solid ${on?'var(--amber)':'var(--border2)'};background:${on?'rgba(245,158,11,.18)':'var(--bg3)'};color:${on?'var(--amber)':'var(--text2)'};font-family:'JetBrains Mono',monospace;font-size:.82rem;font-weight:700;cursor:pointer">${d}</button>`;
+    }).join('');
+    row.innerHTML=`<div style="width:100%;display:flex;flex-direction:column;gap:8px;padding:0 2px">
+      <div style="font-size:.63rem;font-weight:800;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;text-align:center">Select Barrier</div>
+      <div style="display:flex;gap:3px;justify-content:center">${bBtns}</div>
+      <div style="display:flex;gap:6px">
+        <button class="exec-btn up" style="flex:1" onclick="${clickFn}('Over')">
+          <div class="exec-btn-left"><div class="exec-name">Over ${selBarrier}</div><div class="exec-pct">${pct}</div></div>
+          <div class="exec-btn-right"><div class="exec-payout-amt">$${payout}</div><div class="exec-payout-lbl">Payout</div></div>
+        </button>
+        <button class="exec-btn dn" style="flex:1" onclick="${clickFn}('Under')">
+          <div class="exec-btn-left"><div class="exec-name">Under ${selBarrier}</div><div class="exec-pct">${pct}</div></div>
+          <div class="exec-btn-right"><div class="exec-payout-amt">$${payout}</div><div class="exec-payout-lbl">Payout</div></div>
+        </button>
+      </div>
+    </div>`;
+    return;
+  }
+
+  // All other contracts
   const btnDefs={
     DIGITEVEN:[{cls:'up',name:'Even'},{cls:'dn',name:'Odd'}],
     DIGITODD:[{cls:'up',name:'Even'},{cls:'dn',name:'Odd'}],
-    DIGITMATCH:[{cls:'up',name:'Match '+(selDig>=0?selDig:'?')},{cls:'dn',name:'Differ '+(selDig>=0?selDig:'?')}],
-    DIGITDIFF:[{cls:'up',name:'Match '+(selDig>=0?selDig:'?')},{cls:'dn',name:'Differ '+(selDig>=0?selDig:'?')}],
-    DIGITOVER:[{cls:'up',name:'Over 5'},{cls:'dn',name:'Under 5'}],
-    DIGITUNDER:[{cls:'up',name:'Over 5'},{cls:'dn',name:'Under 5'}],
-    CALL:[{cls:'up',name:'Rise ↑'},{cls:'dn',name:'Fall ↓'}],
-    PUT:[{cls:'up',name:'Rise ↑'},{cls:'dn',name:'Fall ↓'}],
+    CALL:[{cls:'up',name:'Rise'},{cls:'dn',name:'Fall'}],
+    PUT:[{cls:'up',name:'Rise'},{cls:'dn',name:'Fall'}],
   };
   const btns=btnDefs[contractType]||btnDefs.DIGITEVEN;
-  const clickFn=tradeMode==='auto'?'startAutoTrade':'placeTrade';
   row.innerHTML=btns.map(b=>`
     <button class="exec-btn ${b.cls}" onclick="${clickFn}('${b.name.split(' ')[0]}')">
-      <div class="exec-btn-left"><div class="exec-name">${b.name}</div><div class="exec-pct">${tradeMode==='auto'?'AUTO · '+pct:pct}</div></div>
+      <div class="exec-btn-left"><div class="exec-name">${b.name}</div><div class="exec-pct">${pct}</div></div>
       <div class="exec-btn-right"><div class="exec-payout-amt">$${payout}</div><div class="exec-payout-lbl">Payout</div></div>
     </button>`).join('');
 }
@@ -1382,8 +1430,8 @@ function resolveWin(dir,price,entry){
   const rand=Math.random();
   if(dir==='Even')      return dig%2===0;
   if(dir==='Odd')       return dig%2!==0;
-  if(dir==='Over')      return dig>5;
-  if(dir==='Under')     return dig<5;
+  if(dir==='Over')      return dig>selBarrier;
+  if(dir==='Under')     return dig<selBarrier;
   if(dir==='Match')     return selDig>=0?dig===selDig:rand<winProb;
   if(dir==='Differ')    return selDig>=0?dig!==selDig:rand<winProb;
   if(dir==='Rise')      return rand<winProb?(price>entry):false;
@@ -1526,7 +1574,7 @@ function buildSymSheet(){
 }
 function pickSym(id,name,el){
   sym=id;symName=name;
-  ticks=[];digitCounts=new Array(10).fill(0);totalTicks=0;lastDig=-1;selDig=-1;
+  ticks=[];digitCounts=new Array(10).fill(0);totalTicks=0;lastDig=-1;selDig=-1;selBarrier=5;
   document.getElementById('sym-title').textContent=name.replace(' Index','').replace('Volatility','Vol');
   document.getElementById('sym-price-bar').textContent='——';
   document.getElementById('sym-chg-bar').textContent='';
