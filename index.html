@@ -196,6 +196,15 @@ img{max-width:100%;display:block}
   .stats-section{padding:40px 16px}.stat-num{font-size:1.9rem}
   .ai-section .ai-copy{order:-1}
   .footer{flex-direction:column;align-items:flex-start;gap:12px}
+  .modal-content{padding:20px 16px 16px;border-radius:14px;max-height:96vh}
+  .modal-title{font-size:1.1rem}
+  .fi{font-size:16px !important}
+  .auth-submit{padding:13px;font-size:.92rem}
+  .auth-tab{font-size:.78rem;padding:8px}
+}
+@media(max-width:380px){
+  .modal-content{padding:16px 12px 12px}
+  .modal-title{font-size:1rem}
 }
 </style>
 </head>
@@ -252,6 +261,39 @@ img{max-width:100%;display:block}
           <div class="em" id="l-pw-e">Enter your password</div>
         </div>
         <button class="auth-submit" id="login-btn" onclick="doLogin()">Sign In</button>
+        <div style="text-align:center;margin-top:12px">
+          <button onclick="switchTab('forgot')" style="background:none;border:none;color:var(--blue);font-size:.8rem;font-weight:600;cursor:pointer;text-decoration:underline">Forgot Password?</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── FORGOT PASSWORD FORM ── -->
+    <div id="form-forgot" style="display:none">
+      <div class="auth-form">
+        <div class="fg">
+          <label class="fl">Email Address</label>
+          <input class="fi" id="fp-email" type="email" placeholder="Enter your registered email" autocomplete="email">
+          <div class="em" id="fp-email-e"></div>
+        </div>
+        <div id="fp-otp-row" style="display:none">
+          <div class="fg">
+            <label class="fl">OTP Code <span class="hint">sent to your email</span></label>
+            <input class="fi" id="fp-otp" type="text" placeholder="6-digit code" maxlength="6">
+            <div class="em" id="fp-otp-e"></div>
+          </div>
+          <div class="fg">
+            <label class="fl">New Password <span class="hint">min 6 characters</span></label>
+            <div class="pww">
+              <input class="fi" id="fp-pw" type="password" placeholder="New password">
+              <span class="pwe" onclick="togPw('fp-pw',this)">👁</span>
+            </div>
+            <div class="em" id="fp-pw-e"></div>
+          </div>
+        </div>
+        <button class="auth-submit" id="fp-btn" onclick="doForgot()">Send OTP</button>
+        <div style="text-align:center;margin-top:12px">
+          <button onclick="switchTab('login')" style="background:none;border:none;color:var(--blue);font-size:.8rem;font-weight:600;cursor:pointer">← Back to Login</button>
+        </div>
       </div>
     </div>
 
@@ -542,13 +584,73 @@ function switchTab(tab){
   currentTab=tab;
   document.getElementById('form-login').style.display    = tab==='login'?'block':'none';
   document.getElementById('form-register').style.display = tab==='register'?'block':'none';
+  document.getElementById('form-forgot').style.display   = tab==='forgot'?'block':'none';
   document.getElementById('tab-login').classList.toggle('on',    tab==='login');
   document.getElementById('tab-register').classList.toggle('on', tab==='register');
-  const titles={login:'Welcome Back',register:'Create Account'};
-  const subs={login:'Sign in to your trading account',register:'Join Elite Binary — it\'s free'};
-  document.getElementById('modal-title').textContent    = titles[tab];
-  document.getElementById('modal-subtitle').textContent = subs[tab];
+  if(tab!=='forgot'){
+    const r=document.getElementById('fp-otp-row'); if(r) r.style.display='none';
+    const b=document.getElementById('fp-btn'); if(b){b.textContent='Send OTP';delete b.dataset.step;}
+  }
+  const titles={login:'Welcome Back',register:'Create Account',forgot:'Reset Password'};
+  const subs={login:'Sign in to your trading account',register:"Join Elite Binary — it's free",forgot:'Enter your email to get a reset code'};
+  document.getElementById('modal-title').textContent    = titles[tab]||'';
+  document.getElementById('modal-subtitle').textContent = subs[tab]||'';
   hideMsg();
+}
+
+// ── FORGOT PASSWORD ──────────────────────────────
+async function doForgot(){
+  const btn=document.getElementById('fp-btn');
+  const step=btn.dataset.step||'otp';
+
+  if(step==='otp'){
+    // Step 1: send OTP
+    const email=document.getElementById('fp-email').value.trim().toLowerCase();
+    const eEl=document.getElementById('fp-email-e');
+    if(!email||!/\S+@\S+\.\S+/.test(email)){eEl.textContent='Enter a valid email';eEl.style.display='block';return;}
+    eEl.style.display='none';
+    btn.disabled=true;btn.innerHTML='<span class="spin"></span>Sending…';
+    try{
+      const res=await fetch('/api/auth/request-otp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({identifier:email})});
+      const d=await res.json().catch(()=>({}));
+      btn.disabled=false;
+      if(res.ok){
+        document.getElementById('fp-otp-row').style.display='block';
+        btn.textContent='Reset Password';
+        btn.dataset.step='reset';
+        showMsg('OTP sent to '+email+'. Check your inbox.','ok');
+        if(d.devOtp) showMsg('Dev OTP: '+d.devOtp,'ok');
+      } else {
+        showMsg((d.error)||'Could not send OTP. Check email and try again.','err');
+      }
+    }catch(e){btn.disabled=false;showMsg('Server error. Try again.','err');}
+
+  } else {
+    // Step 2: reset password
+    const email=document.getElementById('fp-email').value.trim().toLowerCase();
+    const otp=document.getElementById('fp-otp').value.trim();
+    const pw=document.getElementById('fp-pw').value;
+    const otpEl=document.getElementById('fp-otp-e');
+    const pwEl=document.getElementById('fp-pw-e');
+    let ok=true;
+    if(!otp||otp.length<4){otpEl.textContent='Enter the OTP code';otpEl.style.display='block';ok=false;}else otpEl.style.display='none';
+    if(!pw||pw.length<6){pwEl.textContent='Password must be at least 6 characters';pwEl.style.display='block';ok=false;}else pwEl.style.display='none';
+    if(!ok) return;
+    btn.disabled=true;btn.innerHTML='<span class="spin"></span>Resetting…';
+    try{
+      const res=await fetch('/api/auth/reset-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({identifier:email,otp,newPassword:pw})});
+      const d=await res.json().catch(()=>({}));
+      btn.disabled=false;
+      if(res.ok && d.token){
+        localStorage.setItem('eliteBinaryToken',d.token);
+        localStorage.setItem('eliteBinaryUser',JSON.stringify(d.user||{}));
+        showMsg('Password reset! Redirecting…','ok');
+        setTimeout(()=>window.location.href='/dashboard.html',1000);
+      } else {
+        showMsg((d.error)||'Invalid or expired OTP. Try again.','err');
+      }
+    }catch(e){btn.disabled=false;showMsg('Server error. Try again.','err');}
+  }
 }
 
 // ══════════════════════════════════════════════
