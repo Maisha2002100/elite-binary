@@ -22,6 +22,7 @@ button,input,select{font-family:inherit;outline:none;border:none;background:none
   --text:#e2e8f8;--text2:#7a8fb0;--text3:#3a506a;
 }
 .app{display:flex;flex-direction:column;height:100vh;height:100dvh;max-width:480px;margin:0 auto;background:var(--bg);overflow:hidden;position:relative}
+@media(min-width:768px){.app{max-width:100%;margin:0}}
 /* TOP BAR */
 .topbar{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--bg2);border-bottom:1px solid var(--border);flex-shrink:0;height:52px}
 .tb-left{display:flex;align-items:center;gap:10px}
@@ -363,6 +364,40 @@ button,input,select{font-family:inherit;outline:none;border:none;background:none
   .toast{left:calc(240px + 50%)}
   .acc-drop{left:calc(240px + 50%)}
   #pane-trade{grid-template-columns:1fr 380px;padding:20px 28px}
+}
+@media(min-width:1400px){
+  .bnav{width:260px}
+  .main{margin-left:260px}
+  #pane-trade{grid-template-columns:1fr 420px;padding:24px 32px}
+  .sheet{left:260px;width:480px;max-width:480px}
+  #admin-panel-overlay{left:260px!important}
+  .result-popup{left:260px}
+  .toast{left:calc(260px + 50%)}
+}
+/* ── TABLET (480px–768px) ── */
+@media(min-width:480px) and (max-width:767px){
+  .app{max-width:100%}
+  .exec-btn{padding:18px 12px}
+  .exec-name{font-size:1.15rem}
+  .stake-num{font-size:1.5rem;width:90px}
+  .digit-ring{width:38px;height:38px;font-size:.95rem}
+}
+/* ── SMALL MOBILE (max 360px) ── */
+@media(max-width:360px){
+  .exec-btn{padding:12px 6px}
+  .exec-name{font-size:.92rem}
+  .exec-payout-amt{font-size:.8rem}
+  .tsm-input{width:48px;font-size:.82rem}
+  .preset{font-size:.68rem}
+  .deposit-btn{padding:6px 12px;font-size:.75rem}
+  .digit-ring{width:30px;height:30px;font-size:.78rem}
+  .stake-num{font-size:1.2rem;width:70px}
+}
+/* ── IOS/ANDROID INPUT FIX ── */
+@media(max-width:768px){
+  input,select{font-size:16px!important}
+  .dep-input{font-size:16px!important}
+  .stake-num{font-size:1.35rem}
 }
 </style>
 </head>
