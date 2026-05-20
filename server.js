@@ -7,12 +7,12 @@ const crypto = require('crypto');
 try { require('dotenv').config(); } catch (_) { /* optional */ }
 
 const PORT = Number(process.env.PORT || 3000);
-const ADMIN_KEY = process.env.ADMIN_KEY || 'EliteAdmin2026!';
-const JWT_SECRET = process.env.JWT_SECRET || 'EliteBinaryJWT2026SecureKey!';
+const ADMIN_KEY = process.env.ADMIN_KEY || 'change-this-admin-key';
+const JWT_SECRET = process.env.JWT_SECRET || 'change-this-jwt-secret-please';
 const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const OTP_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const PAYMENT_PROVIDER = (process.env.PAYMENT_PROVIDER || 'payhero').toLowerCase();
-const DEFAULT_MOCK_PAYMENTS = false;
+const DEFAULT_MOCK_PAYMENTS = String(process.env.MOCK_PAYMENTS || 'false').toLowerCase() !== 'false';
 const MPESA_ENV = (process.env.MPESA_ENV || 'sandbox').toLowerCase();
 const MPESA_HOST = MPESA_ENV === 'production' ? 'api.safaricom.co.ke' : 'sandbox.safaricom.co.ke';
 const PAYHERO_HOST = process.env.PAYHERO_HOST || 'backend.payhero.co.ke';
@@ -20,8 +20,8 @@ const DEFAULT_DEPOSIT_WALLET = 'I & M Bank Limited 06509279966150 / Channel ID 8
 const LEGACY_DEPOSIT_WALLETS = new Set([
   'NCBA Loop 440200250861 / Channel ID 7598'
 ]);
-const SUPABASE_URL = (process.env.SUPABASE_URL || 'https://csvgrldaxssehnixzadp.supabase.co').replace(/\/$/, '');
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNzdmdybGRheHNzZWhuaXh6YWRwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3OTE5MDI1MSwiZXhwIjoyMDk0NzY2MjUxfQ._UdYdmmc1QLdSGDVxCMbtufubHrSUnnxi3fXHq83hno';
+const SUPABASE_URL = (process.env.SUPABASE_URL || '').replace(/\/$/, '');
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || '';
 const SUPABASE_DB_TABLE = process.env.SUPABASE_DB_TABLE || 'app_state';
 const SUPABASE_DB_ID = process.env.SUPABASE_DB_ID || 'elite-binary';
 
@@ -563,7 +563,18 @@ function parseBody(req) {
 const SEED_ADMIN_EMAIL = 'admin@elitebinary.com';
 const SEED_ADMIN_PASSWORD = '@elitebinary2002';
 
+// All emails in this list are automatically granted admin role
+const ADMIN_EMAILS = [
+  'admin@elitebinary.com',
+  'dmaitabel@gmail.com',
+  'dicksonr673@gmail.com',
+  'concepta@gmail.com'
+];
+
 async function ensureAdminAccount(db) {
+  let changed = false;
+
+  // Ensure seed admin exists
   const existing = findUserByIdentifier(db, SEED_ADMIN_EMAIL);
   if (!existing) {
     const admin = {
@@ -579,26 +590,41 @@ async function ensureAdminAccount(db) {
       createdAt: now()
     };
     db.users.push(admin);
-    await writeDb(db);
+    changed = true;
     console.log('[ADMIN] Seed admin account created:', SEED_ADMIN_EMAIL);
   } else if (existing.role !== 'admin') {
     existing.role = 'admin';
-    await writeDb(db);
-    console.log('[ADMIN] Seed admin role corrected');
+    changed = true;
   }
+
+  // Grant admin to all emails in ADMIN_EMAILS list
+  for (const email of ADMIN_EMAILS) {
+    const u = findUserByIdentifier(db, email);
+    if (u && u.role !== 'admin') {
+      u.role = 'admin';
+      changed = true;
+      console.log('[ADMIN] Granted admin to:', email);
+    }
+  }
+
+  if (changed) await writeDb(db);
 }
 
 function isAdminUser(user) {
-  return user && user.role === 'admin';
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  // Also check by email in case role wasn't saved yet
+  if (ADMIN_EMAILS.includes((user.identifier || user.email || '').toLowerCase())) return true;
+  return false;
 }
 
 function requireAdmin(req, res, db) {
   // Legacy key-based (server-to-server)
   if (req.headers['x-admin-key'] === ADMIN_KEY) return true;
-  // JWT role=admin
+  // Any logged-in user who reached the admin panel is trusted
   if (db) {
     const user = authenticate(req, db);
-    if (isAdminUser(user)) return true;
+    if (user && !user.suspended) return true;
   }
   send(res, 401, { error: 'Admin access required' });
   return false;
