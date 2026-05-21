@@ -2525,6 +2525,19 @@ function logout(){
 
   <!-- ── TAB: WITHDRAWALS ── -->
   <div id="apane-withdrawals" class="adm-pane" style="display:none;padding:14px">
+
+    <!-- How to process withdrawals guide -->
+    <div style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:10px;padding:12px;margin-bottom:12px">
+      <div style="font-size:.75rem;font-weight:800;color:#f59e0b;margin-bottom:6px">📋 HOW TO PROCESS WITHDRAWALS</div>
+      <div style="font-size:.7rem;color:#cbd5e1;line-height:1.6">
+        1. See a <b>Pending</b> withdrawal below<br>
+        2. Send the exact amount to the M-Pesa number shown<br>
+        3. Tap <b>✓ Mark as Paid</b> on the card to confirm<br>
+        4. User is notified and status updates to Paid<br>
+        <span style="color:#ef4444">✗ Reject</span> only if the request is fraudulent — this refunds the user.
+      </div>
+    </div>
+
     <div class="adm-section">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
         <div class="adm-section-title" style="margin-bottom:0">⬆️ Withdrawal Requests</div>
@@ -2532,27 +2545,10 @@ function logout(){
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px">
         <div onclick="admFilterWd('all')" id="wd-flt-all" class="adm-flt on">All</div>
-        <div onclick="admFilterWd('processing')" id="wd-flt-processing" class="adm-flt">Pending</div>
+        <div onclick="admFilterWd('pending')" id="wd-flt-processing" class="adm-flt">Pending</div>
         <div onclick="admFilterWd('paid')" id="wd-flt-paid" class="adm-flt">Paid</div>
       </div>
       <div id="adm-withdrawals-list"><div class="adm-empty">Tap ↻ to load withdrawals</div></div>
-    </div>
-    <!-- Manual withdrawal action -->
-    <div class="adm-section">
-      <div class="adm-section-title">🛠️ Approve / Reject</div>
-      <input id="adm-wd-id" type="text" placeholder="Withdrawal ID (wd_…)"
-        style="width:100%;background:#111827;border:1px solid #1e2d45;border-radius:8px;padding:10px 12px;font-size:.82rem;color:#e2e8f8;margin-bottom:8px">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        <button onclick="admApproveWd('approve')"
-          style="padding:11px;background:rgba(34,197,94,.15);border:1px solid rgba(34,197,94,.4);border-radius:8px;font-size:.82rem;font-weight:700;color:#22c55e;cursor:pointer">
-          ✓ Approve
-        </button>
-        <button onclick="admApproveWd('reject')"
-          style="padding:11px;background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);border-radius:8px;font-size:.82rem;font-weight:700;color:#ef4444;cursor:pointer">
-          ✗ Reject
-        </button>
-      </div>
-      <div id="adm-wd-msg" style="margin-top:7px;font-size:.74rem;font-weight:600;text-align:center;min-height:16px"></div>
     </div>
   </div>
 
@@ -3222,17 +3218,66 @@ function _renderAdmWithdrawals(wds){
   const list=document.getElementById('adm-withdrawals-list');
   if(!list) return;
   const f=_admWdFilter;
-  const filtered=(wds||[]).filter(w=>f==='all'||w.status===f).slice(-30).reverse();
-  if(!filtered.length){ list.innerHTML='<div class="adm-empty">No withdrawals</div>'; return; }
-  list.innerHTML=filtered.map(w=>`
-    <div onclick="document.getElementById('adm-wd-id').value='${w.id||''}'"
-      style="padding:10px 4px;border-bottom:1px solid #1e2d45;cursor:pointer">
-      <div style="display:flex;align-items:center;justify-content:space-between">
-        <div style="font-size:.72rem;font-weight:700;color:#e2e8f8">$${(w.amount||0).toFixed(2)}</div>
-        <span style="font-size:.62rem;font-weight:700;padding:2px 7px;border-radius:4px;background:${w.status==='paid'?'rgba(34,197,94,.15)':w.status==='failed'?'rgba(239,68,68,.15)':'rgba(245,158,11,.15)'};color:${w.status==='paid'?'#22c55e':w.status==='failed'?'#ef4444':'#f59e0b'}">${w.status}</span>
+  const filtered=(wds||[]).filter(w=>{
+    if(f==='all') return true;
+    if(f==='pending') return w.status==='pending'||w.status==='processing';
+    return w.status===f;
+  }).reverse();
+  if(!filtered.length){ list.innerHTML='<div class="adm-empty">No withdrawals yet</div>'; return; }
+  list.innerHTML=filtered.map(w=>{
+    const isPending=w.status==='pending'||w.status==='processing';
+    const amtKes=w.amountKes||Math.round((w.amount||0)*129);
+    const phone=w.destination||w.phone||'—';
+    const statusColor=w.status==='paid'?'#22c55e':w.status==='failed'?'#ef4444':'#f59e0b';
+    const statusBg=w.status==='paid'?'rgba(34,197,94,.15)':w.status==='failed'?'rgba(239,68,68,.15)':'rgba(245,158,11,.15)';
+    const actionBtns=isPending?`
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px">
+        <button onclick="event.stopPropagation();admQuickApproveWd('${w.id||''}','approve')"
+          style="padding:9px;background:rgba(34,197,94,.18);border:1px solid rgba(34,197,94,.45);border-radius:7px;font-size:.75rem;font-weight:800;color:#22c55e;cursor:pointer">
+          ✓ Mark as Paid
+        </button>
+        <button onclick="event.stopPropagation();admQuickApproveWd('${w.id||''}','reject')"
+          style="padding:9px;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.35);border-radius:7px;font-size:.75rem;font-weight:800;color:#ef4444;cursor:pointer">
+          ✗ Reject & Refund
+        </button>
       </div>
-      <div style="font-size:.62rem;color:#7a8fb0;margin-top:2px">${w.id||''} · ${w.destination||w.phone||''} · ${(w.createdAt||'').slice(0,10)}</div>
-    </div>`).join('');
+      <div id="qwd-msg-${w.id||''}" style="font-size:.72rem;font-weight:700;text-align:center;min-height:14px;margin-top:4px"></div>`:'';
+    return `
+    <div style="padding:12px 4px;border-bottom:1px solid #1e2d45">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <div style="font-size:.78rem;font-weight:800;color:#e2e8f8">KES ${amtKes.toLocaleString()} · $${(w.amount||0).toFixed(2)}</div>
+          <div style="font-size:.72rem;font-weight:700;color:#f59e0b;margin-top:2px">📱 Send to: ${phone}</div>
+        </div>
+        <span style="font-size:.62rem;font-weight:700;padding:3px 8px;border-radius:5px;background:${statusBg};color:${statusColor}">${w.status}</span>
+      </div>
+      <div style="font-size:.62rem;color:#7a8fb0;margin-top:3px">${w.id||''} · ${(w.createdAt||'').slice(0,10)}</div>
+      ${actionBtns}
+    </div>`;
+  }).join('');
+}
+
+async function admQuickApproveWd(withdrawalId, action){
+  const msgEl=document.getElementById('qwd-msg-'+withdrawalId);
+  if(msgEl){ msgEl.textContent='Processing…'; msgEl.style.color='var(--text3)'; }
+  try{
+    const res=await fetch('/api/admin/withdrawals/approve',{method:'POST',headers:admHeaders(),body:JSON.stringify({withdrawalId,action})});
+    const d=await res.json().catch(()=>({}));
+    if(!res.ok){
+      if(msgEl){ msgEl.textContent='✗ '+(d.error||'Failed'); msgEl.style.color='var(--red)'; }
+      return;
+    }
+    if(msgEl){
+      msgEl.textContent=action==='approve'?'✓ Marked as paid!':'✓ Rejected & refunded';
+      msgEl.style.color=action==='approve'?'var(--green)':'var(--amber)';
+    }
+    showToast(action==='approve'?'Withdrawal Paid':'Withdrawal Rejected',
+      action==='approve'?'User notified':'Balance refunded to user',
+      action==='approve'?'ok':'warn');
+    setTimeout(()=>admLoadSummary(),1000);
+  }catch(e){
+    if(msgEl){ msgEl.textContent='✗ Server error — log out and back in'; msgEl.style.color='var(--red)'; }
+  }
 }
 
 function admFilterWd(f){
