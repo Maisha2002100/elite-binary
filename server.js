@@ -1202,10 +1202,10 @@ async function routeApi(req, res) {
       return send(res, 200, {
         config: db.config,
         users: db.users.map(publicUser),
-        deposits: db.deposits.slice(-100),
-        withdrawals: db.withdrawals.slice(-100),
-        trades: db.trades.slice(-100),
-        ledger: db.ledger.slice(-200)
+        deposits: db.deposits.slice(-500),
+        withdrawals: db.withdrawals.slice(-500),
+        trades: db.trades.slice(-200),
+        ledger: db.ledger.slice(-500)
       });
     }
 
