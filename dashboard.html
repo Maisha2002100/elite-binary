@@ -2448,12 +2448,13 @@ function logout(){
   <div id="apane-users" class="adm-pane" style="display:none;padding:14px">
     <div class="adm-section">
       <div class="adm-section-title">🔍 Search Users</div>
-      <div style="display:flex;gap:8px;margin-bottom:10px">
-        <input id="adm-user-search" type="text" placeholder="Name, email or ID…"
+      <div style="display:flex;gap:8px;margin-bottom:6px">
+        <input id="adm-user-search" type="text" placeholder="Name, email, phone or ID…"
           style="flex:1;background:#111827;border:1px solid #1e2d45;border-radius:8px;padding:10px 12px;font-size:.82rem;color:#e2e8f8"
           oninput="admFilterUsers()">
         <button onclick="admLoadSummary()" style="padding:10px 14px;background:#1b6ef5;border-radius:8px;font-size:.8rem;font-weight:700;color:#fff;cursor:pointer">↻</button>
       </div>
+      <div id="adm-users-count" style="font-size:.7rem;color:#7a8fb0;font-weight:600;margin-bottom:8px">0 users</div>
       <div id="adm-users-list"><div class="adm-empty">Tap ↻ to load users</div></div>
     </div>
 
@@ -3159,10 +3160,13 @@ function _renderAdmUsers(users){
   const q=(document.getElementById('adm-user-search')||{}).value||'';
   const filtered=(users||[]).filter(u=>u.role!=='admin').filter(u=>{
     if(!q) return true;
-    const s=(u.name+' '+(u.email||u.identifier||'')+' '+(u.id||'')).toLowerCase();
+    const s=((u.name||'')+' '+(u.email||u.identifier||'')+' '+(u.id||'')+' '+(u.phone||'')).toLowerCase();
     return s.includes(q.toLowerCase());
-  }).slice(-50).reverse();
+  }).reverse();
   if(!filtered.length){ list.innerHTML='<div class="adm-empty">No users found</div>'; return; }
+  // Show count
+  const countEl=document.getElementById('adm-users-count');
+  if(countEl) countEl.textContent=filtered.length+' users';
   list.innerHTML=filtered.map(u=>`
     <div class="adm-user-row" onclick="document.getElementById('adm-user-id').value='${u.id||u.userId||''}'">
       <div style="flex:1;min-width:0">
