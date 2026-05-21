@@ -499,6 +499,25 @@ async function initiatePayheroStkPush({ amount, phone, accountReference, custome
   return payheroRequest('POST', '/api/v2/payments', payload);
 }
 
+// PayHero withdrawal/payout to M-Pesa
+async function initiatePayheroWithdrawal({ amount, phone, reference, name }) {
+  const channelId = process.env.PAYHERO_CHANNEL_ID || process.env.MPESA_CHANNEL_ID;
+  const callbackUrl = process.env.PAYHERO_CALLBACK_URL || process.env.MPESA_CALLBACK_URL || '';
+  if (!channelId) throw new Error('PayHero channel ID not configured');
+  const phone254 = normalizePhone254(phone);
+  const payload = {
+    amount: Math.round(amount),
+    phone_number: phone254,
+    network_code: process.env.PAYHERO_NETWORK_CODE || '63902',
+    callback_url: callbackUrl.replace('/payhero/callback', '/payhero/withdraw-callback'),
+    channel_id: Number(channelId),
+    external_reference: reference,
+    customer_name: name || 'Elite Binary User',
+    payment_type: 'withdrawal'
+  };
+  return payheroRequest('POST', '/api/v2/withdraw', payload);
+}
+
 async function sendB2cPayment({ amount, destination, reference }) {
   const shortCode = process.env.MPESA_B2C_SHORTCODE;
   const initiatorName = process.env.MPESA_B2C_INITIATOR_NAME;
@@ -901,9 +920,8 @@ async function routeApi(req, res) {
 
       db.deposits.push(deposit);
 
-      // Auto-credit balance immediately on both mock and real STK push.
-      // For real M-Pesa: credit on STK send (optimistic). Duplicate-credit
-      // is prevented by the ledger reference guard used in callbacks.
+      // Credit balance immediately for both mock and real STK.
+      // If callback also arrives, duplicate-credit is prevented by ledger guard.
       if (!db.ledger.some(l => l.reference === deposit.id && l.type === 'deposit')) {
         deposit.status = 'completed';
         user.balance = money(user.balance + amountUsd);
@@ -914,6 +932,7 @@ async function routeApi(req, res) {
           balanceAfter: user.balance,
           reference: deposit.id
         });
+        console.log(`[Deposit] Credited $${amountUsd} to ${user.identifier} — balance now $${user.balance}`);
       }
 
       await writeDb(db);
@@ -921,8 +940,8 @@ async function routeApi(req, res) {
         deposit,
         user: publicUser(user),
         message: db.config.mockPayments
-          ? `Mock: KES ${amountKes} ($${amountUsd}) credited (mock mode on).`
-          : `KES ${amountKes} ($${amountUsd}) credited. STK sent to ${phone254} — enter PIN to confirm payment.`
+          ? `Mock: KES ${amountKes} ($${amountUsd}) credited instantly.`
+          : `KES ${amountKes} ($${amountUsd}) credited to your real account! STK sent to ${phone254} — enter PIN to confirm payment.`
       });
     }
 
@@ -1063,16 +1082,41 @@ async function routeApi(req, res) {
         method: String(body.method || 'mpesa'),
         destination: String(body.destination || '').trim(),
         amount,
-        status: db.config.mockPayments ? 'paid' : 'processing',
+        amountKes: Math.round(amount * 129),
+        status: 'pending',
         providerReference: id('pay'),
+        autoAttempted: false,
         createdAt: now()
       };
-      if (!db.config.mockPayments && withdrawal.method.toLowerCase().includes('mpesa')) {
-        const payment = await sendB2cPayment({ amount, destination: withdrawal.destination, reference: withdrawal.id });
-        withdrawal.status = 'processing';
-        withdrawal.providerReference = payment.OriginatorConversationID || withdrawal.id;
-        withdrawal.providerResponse = payment;
+
+      if (db.config.mockPayments) {
+        // Mock mode — pay instantly
+        withdrawal.status = 'paid';
+        withdrawal.autoAttempted = true;
+        console.log(`[Withdrawal] Mock: $${amount} to ${withdrawal.destination}`);
+      } else {
+        // Try PayHero auto-payout first
+        try {
+          const payout = await initiatePayheroWithdrawal({
+            amount: withdrawal.amountKes,
+            phone: withdrawal.destination,
+            reference: withdrawal.id,
+            name: user.name || user.identifier
+          });
+          withdrawal.status = 'processing';
+          withdrawal.autoAttempted = true;
+          withdrawal.providerReference = payout.reference || payout.CheckoutRequestID || withdrawal.id;
+          withdrawal.providerResponse = payout;
+          console.log(`[Withdrawal] PayHero payout sent: $${amount} → ${withdrawal.destination}`);
+        } catch (payErr) {
+          // PayHero failed — fall back to manual approval
+          withdrawal.status = 'pending';
+          withdrawal.autoAttempted = false;
+          withdrawal.autoError = payErr.message;
+          console.warn(`[Withdrawal] PayHero payout failed, queued for manual: ${payErr.message}`);
+        }
       }
+
       db.withdrawals.push(withdrawal);
       ledger(db, {
         userId: user.id,
@@ -1082,7 +1126,47 @@ async function routeApi(req, res) {
         reference: withdrawal.id
       });
       await writeDb(db);
-      return send(res, 200, { withdrawal, user: publicUser(user) });
+
+      const msg = withdrawal.status === 'paid'
+        ? `Withdrawal of KES ${withdrawal.amountKes} processed instantly.`
+        : withdrawal.status === 'processing'
+        ? `Withdrawal of KES ${withdrawal.amountKes} is being sent to ${withdrawal.destination}. Usually takes 1–2 minutes.`
+        : `Withdrawal of KES ${withdrawal.amountKes} received. Will be sent to ${withdrawal.destination} shortly after admin approval.`;
+
+      return send(res, 200, { withdrawal, user: publicUser(user), message: msg });
+    }
+
+    // PayHero withdrawal callback
+    if (req.method === 'POST' && url.pathname === '/api/payhero/withdraw-callback') {
+      const body = await parseBody(req);
+      const callback = body.response || body;
+      const reference = callback.ExternalReference || callback.external_reference || body.user_reference;
+      const resultCode = Number(callback.ResultCode ?? (callback.Status === 'Success' ? 0 : 1));
+      const withdrawal = db.withdrawals.find(w => w.id === reference || w.providerReference === reference);
+      if (!withdrawal) return send(res, 200, { ok: true, ignored: true });
+      withdrawal.callback = body;
+      if (resultCode === 0 || String(callback.Status||'').toLowerCase() === 'success') {
+        withdrawal.status = 'paid';
+        withdrawal.providerReceipt = callback.MpesaReceiptNumber || callback.receipt;
+        console.log(`[Withdrawal] Confirmed paid: ${withdrawal.id}`);
+      } else {
+        withdrawal.status = 'failed';
+        // Refund user balance
+        const user = findUser(db, withdrawal.userId);
+        if (user && !db.ledger.some(l => l.reference === withdrawal.id+':refund')) {
+          user.balance = money(user.balance + withdrawal.amount);
+          ledger(db, {
+            userId: user.id,
+            type: 'withdrawal_refund',
+            amount: withdrawal.amount,
+            balanceAfter: user.balance,
+            reference: withdrawal.id + ':refund'
+          });
+          console.log(`[Withdrawal] Failed — refunded $${withdrawal.amount} to ${user.identifier}`);
+        }
+      }
+      await writeDb(db);
+      return send(res, 200, { ok: true });
     }
 
     if (req.method === 'POST' && url.pathname === '/api/mpesa/b2c-result') {
@@ -1164,7 +1248,29 @@ async function routeApi(req, res) {
       if (!wd) return send(res, 404, { error: 'Withdrawal not found' });
       const action = String(body.action || 'approve');
       if (action === 'approve') {
-        wd.status = 'paid';
+        // Try PayHero auto-payout if not already attempted
+        if (!wd.autoAttempted && !db.config.mockPayments) {
+          try {
+            const payout = await initiatePayheroWithdrawal({
+              amount: wd.amountKes || Math.round(wd.amount * 129),
+              phone: wd.destination,
+              reference: wd.id,
+              name: findUser(db, wd.userId)?.name || 'User'
+            });
+            wd.status = 'processing';
+            wd.autoAttempted = true;
+            wd.providerReference = payout.reference || payout.CheckoutRequestID || wd.id;
+            wd.providerResponse = payout;
+            console.log(`[Admin Withdrawal] PayHero payout sent: $${wd.amount} → ${wd.destination}`);
+          } catch (e) {
+            // PayHero failed — just mark as paid (admin manually sent it)
+            wd.status = 'paid';
+            wd.adminNote = 'Manually approved — PayHero failed: ' + e.message;
+            console.warn(`[Admin Withdrawal] PayHero failed, marked paid manually: ${e.message}`);
+          }
+        } else {
+          wd.status = 'paid';
+        }
       } else if (action === 'reject') {
         wd.status = 'failed';
         const user = findUser(db, wd.userId);
