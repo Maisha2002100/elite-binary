@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2340,36 +2339,63 @@ function logout(){
   <div id="apane-overview" class="adm-pane" style="padding:14px">
     <!-- Stats grid -->
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:14px">
-      <div class="adm-card" style="grid-column:1/-1;background:linear-gradient(135deg,rgba(27,110,245,.2),rgba(124,58,237,.15));border-color:rgba(27,110,245,.4)">
-        <div style="font-size:.62rem;color:#7a8fb0;text-transform:uppercase;font-weight:700;letter-spacing:.06em">Daily Volume</div>
-        <div style="font-family:'JetBrains Mono',monospace;font-size:1.6rem;font-weight:900;color:#fff;margin-top:2px" id="adm-ov-volume">$0.00</div>
-        <div style="font-size:.7rem;color:#22c55e;margin-top:2px" id="adm-ov-vol-trades">from 0 trades today</div>
+
+      <!-- Total Deposits -->
+      <div class="adm-card" style="background:linear-gradient(135deg,rgba(34,197,94,.15),rgba(34,197,94,.05));border-color:rgba(34,197,94,.3)">
+        <div style="font-size:.6rem;color:#7a8fb0;text-transform:uppercase;font-weight:700">Total Deposits</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:1.35rem;font-weight:900;color:#22c55e;margin-top:2px" id="adm-ov-total-dep">$0.00</div>
+        <div style="font-size:.65rem;color:#7a8fb0;margin-top:1px" id="adm-ov-dep-count">0 completed</div>
       </div>
+
+      <!-- Total Withdrawals -->
+      <div class="adm-card" style="background:linear-gradient(135deg,rgba(239,68,68,.15),rgba(239,68,68,.05));border-color:rgba(239,68,68,.3)">
+        <div style="font-size:.6rem;color:#7a8fb0;text-transform:uppercase;font-weight:700">Total Withdrawals</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:1.35rem;font-weight:900;color:#ef4444;margin-top:2px" id="adm-ov-total-wd">$0.00</div>
+        <div style="font-size:.65rem;color:#7a8fb0;margin-top:1px" id="adm-ov-wd-count">0 paid</div>
+      </div>
+
+      <!-- Net Balance -->
+      <div class="adm-card" style="grid-column:1/-1;background:linear-gradient(135deg,rgba(27,110,245,.2),rgba(124,58,237,.15));border-color:rgba(27,110,245,.4)">
+        <div style="font-size:.62rem;color:#7a8fb0;text-transform:uppercase;font-weight:700;letter-spacing:.06em">Net Platform Balance (Deposits − Withdrawals)</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:1.6rem;font-weight:900;color:#fff;margin-top:2px" id="adm-ov-net">$0.00</div>
+        <div style="font-size:.7rem;color:#22c55e;margin-top:2px" id="adm-ov-vol-trades">from 0 trades</div>
+      </div>
+
+      <!-- Total Users -->
       <div class="adm-card">
         <div style="font-size:.6rem;color:#7a8fb0;text-transform:uppercase;font-weight:700">Total Users</div>
         <div style="font-family:'JetBrains Mono',monospace;font-size:1.4rem;font-weight:900;color:#fff;margin-top:2px" id="adm-ov-users">0</div>
-        <div style="font-size:.65rem;color:#22c55e;margin-top:1px" id="adm-ov-active-users">0 active today</div>
+        <div style="font-size:.65rem;color:#22c55e;margin-top:1px" id="adm-ov-active-users">0 active</div>
       </div>
+
+      <!-- Platform Profit -->
       <div class="adm-card">
         <div style="font-size:.6rem;color:#7a8fb0;text-transform:uppercase;font-weight:700">Platform Profit</div>
         <div style="font-family:'JetBrains Mono',monospace;font-size:1.4rem;font-weight:900;color:#22c55e;margin-top:2px" id="adm-ov-profit">+$0.00</div>
-        <div style="font-size:.65rem;color:#7a8fb0;margin-top:1px" id="adm-ov-profit-rate">0% house edge</div>
+        <div style="font-size:.65rem;color:#7a8fb0;margin-top:1px" id="adm-ov-profit-rate">from trades</div>
       </div>
+
+      <!-- Pending Deposits -->
       <div class="adm-card">
         <div style="font-size:.6rem;color:#7a8fb0;text-transform:uppercase;font-weight:700">Pending Deposits</div>
         <div style="font-family:'JetBrains Mono',monospace;font-size:1.4rem;font-weight:900;color:#f59e0b;margin-top:2px" id="adm-ov-pend-dep">0</div>
-        <div style="font-size:.65rem;color:#7a8fb0;margin-top:1px">awaiting approval</div>
+        <div style="font-size:.65rem;color:#7a8fb0;margin-top:1px" id="adm-ov-pend-dep-amt">$0.00 pending</div>
       </div>
+
+      <!-- Pending Withdrawals -->
       <div class="adm-card">
         <div style="font-size:.6rem;color:#7a8fb0;text-transform:uppercase;font-weight:700">Pending Withdrawals</div>
         <div style="font-family:'JetBrains Mono',monospace;font-size:1.4rem;font-weight:900;color:#ef4444;margin-top:2px" id="adm-ov-pend-wd">0</div>
-        <div style="font-size:.65rem;color:#7a8fb0;margin-top:1px">awaiting approval</div>
+        <div style="font-size:.65rem;color:#7a8fb0;margin-top:1px" id="adm-ov-pend-wd-amt">$0.00 pending</div>
       </div>
+
+      <!-- Total Trades -->
       <div class="adm-card">
-        <div style="font-size:.6rem;color:#7a8fb0;text-transform:uppercase;font-weight:700">Active Trades</div>
+        <div style="font-size:.6rem;color:#7a8fb0;text-transform:uppercase;font-weight:700">Total Trades</div>
         <div style="font-family:'JetBrains Mono',monospace;font-size:1.4rem;font-weight:900;color:#8b5cf6;margin-top:2px" id="adm-ov-active-trades">0</div>
-        <div style="font-size:.65rem;color:#7a8fb0;margin-top:1px">all time</div>
+        <div style="font-size:.65rem;color:#7a8fb0;margin-top:1px" id="adm-ov-win-rate">0% win rate</div>
       </div>
+
     </div>
 
     <!-- Quick market override -->
@@ -2685,8 +2711,15 @@ function logout(){
 const _ADM_EMAIL = 'admin@elitebinary.com';
 const _ADM_PW    = '@elitebinary2002';
 
-function admToken(){ return currentToken || localStorage.getItem('eliteBinaryToken') || ''; }
-function admHeaders(){ return {'Content-Type':'application/json','Authorization':'Bearer '+admToken()}; }
+function admToken(){
+  // Always get freshest token
+  return currentToken || localStorage.getItem('eliteBinaryToken') || sessionStorage.getItem('eliteBinaryToken') || '';
+}
+function admHeaders(){
+  const token = admToken();
+  if(!token) showToast('Session expired','Please log out and log back in','err');
+  return {'Content-Type':'application/json','Authorization':'Bearer '+token};
+}
 
 function revealAdminUI(){
   ['admin-sheet','admin-acct-btn','menu-admin-row'].forEach(id=>{
@@ -2798,8 +2831,7 @@ async function admSaveConfig(){
     const cfg=getConfig();
     Object.assign(cfg,{payout_rate:body.payoutRate,win_probability:body.winProbability,mockPayments:body.mockPayments,wallet:body.designatedWallet});
     localStorage.setItem(DB_CONFIG,JSON.stringify(cfg));
-    msgEl.textContent='✓ Saved locally (offline)'; msgEl.style.color='var(--green)';
-    showToast('Admin','Config saved locally','ok');
+    msgEl.textContent='✗ Cannot reach server — log out and log back in'; msgEl.style.color='var(--red)';
   }catch(e){ msgEl.textContent='✗ '+e.message; msgEl.style.color='var(--red)'; }
 }
 
@@ -2810,16 +2842,12 @@ async function admSuspendUser(suspend){
   msgEl.textContent='Processing…'; msgEl.style.color='var(--text3)';
   try{
     const res=await fetch('/api/admin/users/suspend',{method:'POST',headers:admHeaders(),body:JSON.stringify({userId,suspended:suspend})});
-    const d=await res.json();
-    if(!res.ok){ msgEl.textContent='✗ '+d.error; msgEl.style.color='var(--red)'; return; }
-    msgEl.textContent=suspend?'✓ Suspended':'✓ Unsuspended'; msgEl.style.color='var(--green)'; admLoadSummary(); return;
-  }catch(_){}
-  try{
-    const users=getDB(); const u=users.find(u=>u.id===userId);
-    if(!u){ msgEl.textContent='✗ User not found'; msgEl.style.color='var(--red)'; return; }
-    u.suspended=suspend; saveDB(users);
-    msgEl.textContent=(suspend?'✓ Suspended':'✓ Unsuspended')+' (local)'; msgEl.style.color='var(--green)'; admLoadSummary();
-  }catch(e){ msgEl.textContent='✗ '+e.message; msgEl.style.color='var(--red)'; }
+    const d=await res.json().catch(()=>({}));
+    if(!res.ok){ msgEl.textContent='✗ '+(d.error||'Server error — please log out and log back in'); msgEl.style.color='var(--red)'; return; }
+    msgEl.textContent=suspend?'✓ User suspended':'✓ User unsuspended'; msgEl.style.color='var(--green)';
+    showToast('Admin',suspend?'User suspended':'User unsuspended','ok');
+    setTimeout(()=>admLoadSummary(),500);
+  }catch(e){ msgEl.textContent='✗ Cannot reach server: '+e.message; msgEl.style.color='var(--red)'; }
 }
 
 async function admCreditUser(){
@@ -2831,16 +2859,13 @@ async function admCreditUser(){
   msgEl.textContent='Processing…'; msgEl.style.color='var(--text3)';
   try{
     const res=await fetch('/api/admin/users/credit',{method:'POST',headers:admHeaders(),body:JSON.stringify({userId,amount})});
-    const d=await res.json();
-    if(!res.ok){ msgEl.textContent='✗ '+d.error; msgEl.style.color='var(--red)'; return; }
-    msgEl.textContent='✓ Balance → $'+(d.user.balance||0).toFixed(2); msgEl.style.color='var(--green)'; admLoadSummary(); return;
-  }catch(_){}
-  try{
-    const users=getDB(); const u=users.find(u=>u.id===userId);
-    if(!u){ msgEl.textContent='✗ User not found'; msgEl.style.color='var(--red)'; return; }
-    u.balance=Math.round(((u.balance||0)+amount)*100)/100; u.real_balance=u.balance; saveDB(users);
-    msgEl.textContent='✓ Balance → $'+u.balance.toFixed(2)+' (local)'; msgEl.style.color='var(--green)'; admLoadSummary();
-  }catch(e){ msgEl.textContent='✗ '+e.message; msgEl.style.color='var(--red)'; }
+    const d=await res.json().catch(()=>({}));
+    if(!res.ok){ msgEl.textContent='✗ '+(d.error||'Server error — please log out and log back in'); msgEl.style.color='var(--red)'; return; }
+    const newBal=(d.user?.balance||0).toFixed(2);
+    msgEl.textContent='✓ Balance updated → $'+newBal; msgEl.style.color='var(--green)';
+    showToast('Admin','Balance updated to $'+newBal,'ok');
+    setTimeout(()=>admLoadSummary(),500);
+  }catch(e){ msgEl.textContent='✗ Cannot reach server: '+e.message; msgEl.style.color='var(--red)'; }
 }
 
 async function admApproveWd(action){
@@ -3071,19 +3096,42 @@ function _renderAdmOverview(d){
   const deps=d.deposits||[];
   const wds=d.withdrawals||[];
   const users=d.users||[];
+  const el=id=>document.getElementById(id);
+
+  // Totals
+  const totalDep=deps.filter(x=>x.status==='completed').reduce((s,x)=>s+(x.amount||0),0);
+  const totalDepKes=deps.filter(x=>x.status==='completed').reduce((s,x)=>s+(x.amountKes||Math.round((x.amount||0)*129)),0);
+  const totalWd=wds.filter(x=>x.status==='paid'||x.status==='processing').reduce((s,x)=>s+(x.amount||0),0);
+  const totalWdKes=wds.filter(x=>x.status==='paid'||x.status==='processing').reduce((s,x)=>s+(x.amountKes||Math.round((x.amount||0)*129)),0);
+  const net=totalDep-totalWd;
+  const pendDeps=deps.filter(x=>x.status==='pending'||x.status==='pending_stk');
+  const pendWds=wds.filter(x=>x.status==='pending'||x.status==='processing');
+  const pendDepAmt=pendDeps.reduce((s,x)=>s+(x.amount||0),0);
+  const pendWdAmt=pendWds.reduce((s,x)=>s+(x.amount||0),0);
+
+  // Trades
   const volume=trades.reduce((s,t)=>s+(t.stake||0),0);
   const profit=trades.reduce((s,t)=>s+(t.won?-(t.profit||0):(t.stake||0)),0);
-  const el=id=>document.getElementById(id);
-  if(el('adm-ov-volume')) el('adm-ov-volume').textContent='$'+volume.toFixed(2);
-  if(el('adm-ov-vol-trades')) el('adm-ov-vol-trades').textContent='from '+trades.length+' trades';
+  const wins=trades.filter(t=>t.won).length;
+  const winRate=trades.length?Math.round(wins/trades.length*100):0;
+
+  // Populate cards
+  if(el('adm-ov-total-dep')) el('adm-ov-total-dep').textContent='$'+totalDep.toFixed(2);
+  if(el('adm-ov-dep-count')) el('adm-ov-dep-count').textContent=deps.filter(x=>x.status==='completed').length+' completed · KES '+totalDepKes.toLocaleString();
+  if(el('adm-ov-total-wd')) el('adm-ov-total-wd').textContent='$'+totalWd.toFixed(2);
+  if(el('adm-ov-wd-count')) el('adm-ov-wd-count').textContent=wds.filter(x=>x.status==='paid').length+' paid · KES '+totalWdKes.toLocaleString();
+  if(el('adm-ov-net')) el('adm-ov-net').textContent=(net>=0?'+':'')+' $'+Math.abs(net).toFixed(2);
+  if(el('adm-ov-vol-trades')) el('adm-ov-vol-trades').textContent='from '+trades.length+' trades · volume $'+volume.toFixed(2);
   if(el('adm-ov-users')) el('adm-ov-users').textContent=users.length;
   if(el('adm-ov-active-users')) el('adm-ov-active-users').textContent=users.filter(u=>!u.suspended).length+' active';
-  if(el('adm-ov-profit')) el('adm-ov-profit').textContent=(profit>=0?'+':'')+' $'+Math.abs(profit).toFixed(2);
-  const pendDep=deps.filter(d=>d.status==='pending'||d.status==='pending_stk').length;
-  const pendWd=wds.filter(w=>w.status==='processing').length;
-  if(el('adm-ov-pend-dep')) el('adm-ov-pend-dep').textContent=pendDep;
-  if(el('adm-ov-pend-wd')) el('adm-ov-pend-wd').textContent=pendWd;
+  if(el('adm-ov-profit')) el('adm-ov-profit').textContent=(profit>=0?'+':'')+'$'+Math.abs(profit).toFixed(2);
+  if(el('adm-ov-profit-rate')) el('adm-ov-profit-rate').textContent='from '+trades.length+' trades';
+  if(el('adm-ov-pend-dep')) el('adm-ov-pend-dep').textContent=pendDeps.length;
+  if(el('adm-ov-pend-dep-amt')) el('adm-ov-pend-dep-amt').textContent='$'+pendDepAmt.toFixed(2)+' pending';
+  if(el('adm-ov-pend-wd')) el('adm-ov-pend-wd').textContent=pendWds.length;
+  if(el('adm-ov-pend-wd-amt')) el('adm-ov-pend-wd-amt').textContent='$'+pendWdAmt.toFixed(2)+' pending';
   if(el('adm-ov-active-trades')) el('adm-ov-active-trades').textContent=trades.length;
+  if(el('adm-ov-win-rate')) el('adm-ov-win-rate').textContent=winRate+'% user win rate';
   // Recent activity table
   const act=el('adm-ov-activity');
   if(!act) return;
